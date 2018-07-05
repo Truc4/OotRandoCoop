@@ -25,7 +25,7 @@ This program synchronizes the data of two copies of The Legend of Zelda: Ocarina
 - A: No.
 - Q: **How often does it sync?**
 - A: Any time link goes from controllable to uncontrollable or vice versa.
-- Q: **My partner did <a thing> but I don't see the change?!**
+- Q: **My partner did something but I don't see the change?!**
 - A: Synced data doesn't take effect immediately if you're in the same zone due to engine limitations. Go through a loading zone to fix it.
 
 #### Installation and usage
