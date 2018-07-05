@@ -52,6 +52,9 @@ Tracker Options:
 
 Launch your node once you've finished configuring it by double clicking the OotRandoCoop executable file.
 
+The node window looks like this:
+![node](https://i.imgur.com/iDK2FVs.png "node")
+
 In Bizhawk, go to Config -> Customize -> Advanced and make sure Lua+LuaInterface is selected or this script **will not work**.
 
 ![Lua Configuration](https://i.imgur.com/izrsT5A.png "Lua Configuration")
