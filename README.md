@@ -28,7 +28,7 @@ This system is in two parts
 
 The lua script mostly serves to read/write the game memory. The node program gets information from the lua script via local TCP socket (port 1337) and does all the heavy lifting.
 
-When you pause the game the lua script takes stock of what you have in your inventory and if something new is detected it send that information up to node. Node will run some bit comparisons to ensure nothing is being regressively overwritten and send that information to your partner's node instance via TCP POST (default port 8081, configurable). Any new data that node recieves from your partner is run through the same bit comparisons to ensure nothing is wrong and sends it to the lua script to be written back to the game. During this memory writing it also ensures your C buttons are properly updated in the event an item in a slot changed.
+When you pause the game the lua script takes stock of what you have in your inventory and if something new is detected it sends that information up to node. Node will run some bit comparisons to ensure nothing is being regressively overwritten and send that information to your partner's node instance via TCP POST (default port 8081, configurable). Any new data that node recieves from your partner is run through the same bit comparisons to ensure nothing is wrong and sends it to the lua script to be written back to the game. During this memory writing it also ensures your C buttons are properly updated in the event an item in a slot changed.
 
 When you pass through a loading zone the lua file gathers all your world and quest data. Any new information is sent to node for processing and the same thing occurs. Keep in mind it only updates **when passing through loading zones** because the new data won't be recognized by the game until a new area loads.
 
@@ -49,6 +49,8 @@ Tracker Options:
 - enabled: Enable or disable the built in automated item tracker. The tracker can be accessed by going to http://localhost:8081 in a web browser. Please substitute the 8081 for your configured port number if you changed it.
 
 ![tracker](https://i.imgur.com/LTvTKhm.png)
+
+Launch your node once you've finished configuring it by double clicking the OotRandoCoop executable file.
 
 In Bizhawk, go to Config -> Customize -> Advanced and make sure Lua+LuaInterface is selected or this script **will not work**.
 
