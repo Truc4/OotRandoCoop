@@ -20,17 +20,13 @@ This program synchronizes the data of two copies of The Legend of Zelda: Ocarina
 - Rupees.
 - Current magic.
 - Current HP.
-
-#### Technical Details
-This system is in two parts
-1. A lua script that runs inside the BizHawk Lua Console
-2. A node js program that runs in the background.
-
-The lua script mostly serves to read/write the game memory. The node program gets information from the lua script via local TCP socket (port 1337) and does all the heavy lifting.
-
-When you pause the game the lua script takes stock of what you have in your inventory and if something new is detected it sends that information up to node. Node will run some bit comparisons to ensure nothing is being regressively overwritten and send that information to your partner's node instance via TCP POST (default port 8081, configurable). Any new data that node recieves from your partner is run through the same bit comparisons to ensure nothing is wrong and sends it to the lua script to be written back to the game. During this memory writing it also ensures your C buttons are properly updated in the event an item in a slot changed.
-
-When you pass through a loading zone the lua file gathers all your world and quest data. Any new information is sent to node for processing and the same thing occurs. Keep in mind it only updates **when passing through loading zones** because the new data won't be recognized by the game until a new area loads.
+#### FAQ
+- Q: **Can I see my co-op partner's Link in the game?**
+- A: No.
+- Q: **How often does it sync?**
+- A: Any time link goes from controllable to uncontrollable or vice versa.
+- Q: **My partner did <a thing> but I don't see the change?!**
+- A: Synced data doesn't take effect immediately if you're in the same zone due to engine limitations. Go through a loading zone to fix it.
 
 #### Installation and usage
 The node side of this project can be run directly should you have it. Otherwise we offer precompiled binaries made using [pkg](https://github.com/zeit/pkg "pkg") that contain everything you need for Windows, Linux, and Mac. Get them on the release page.
@@ -64,5 +60,16 @@ Load your rom in BizHawk then load the script in the Lua Console. To access the 
 ![Lua Console](https://i.imgur.com/eLC0R0l.png "Lua Console")
 ![title screen](https://i.imgur.com/9pCU2yv.png "title screen")
 
-Once you and your partners have entered the game and are in Link's house simply pause the game to initiate the syncing system. Please note there will be some lag the first time you exit Link's house. This is perfectly normal as the syncing system does its initial calculations on the world state.
+**Please note there will be a burst of lag the first time you exit Link's house. This is perfectly normal as the syncing system does its initial data collection.**
+
+#### Technical Details
+This system is in two parts
+1. A lua script that runs inside the BizHawk Lua Console
+2. A node js program that runs in the background.
+
+The lua script mostly serves to read/write the game memory. The node program gets information from the lua script via local TCP socket (port 1337) and does all the heavy lifting.
+
+When Link changes state (goes from uncontrollable to controllable or vice versa) the lua script takes stock of what you have in your inventory and if something new is detected it sends that information up to node. Node will run some bit comparisons to ensure nothing is being regressively overwritten and sends that information to your partner's node instance via TCP POST (default port 8081, configurable). Any new data that node receives from your partner is run through the same bit comparisons to ensure nothing is wrong and sends it to the lua script to be written back to the game. During this memory writing it also ensures your C buttons are properly updated in the event an item in a slot changed.
+
+The same thing happens for world and quest state, but please keep in mind any changes made by the sync to the zone you're currently in **won't take effect until you pass through a loading zone.** This is a Zelda64 engine limitation.
 
