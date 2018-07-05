@@ -1,5 +1,5 @@
 # Ocarina of Time Rando Co-Op System
-#### Author: denoflions
+#### Author: [denoflions](https://www.twitch.tv/scrollforinitiative "denoflions")
 #### Primary tester: Delphirus.
 
 ## Description
