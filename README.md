@@ -20,6 +20,7 @@ This program synchronizes the data of two copies of The Legend of Zelda: Ocarina
 - Rupees.
 - Current magic.
 - Current HP.
+- **Dungeon keys**
 #### FAQ
 - Q: **Can I see my co-op partner's Link in the game?**
 - A: No.
