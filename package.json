@@ -1,0 +1,19 @@
+{
+  "name": "oot-rando-coop",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node ./src/app.js"
+  },
+  "bin": "./src/app.js",
+  "dependencies": {
+    "concat-files": "^0.1.1",
+    "nat-upnp": "^1.1.1",
+    "node-ini": "^1.0.0",
+    "node-lzw": "^0.3.1",
+    "restify": "^7.2.1",
+    "serve-static-restify": "^2.1.0",
+    "uuid": "^3.2.1",
+    "ws": "^5.2.1"
+  }
+}
