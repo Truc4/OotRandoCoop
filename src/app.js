@@ -40,53 +40,50 @@ let nickname = cfg.Client.nickname;
 console.log("My UUID: " + my_uuid);
 
 let websocket = null;
-if (isMaster){
+if (isMaster) {
     console.log("Setting up master server...");
+    master_server_ip = "127.0.0.1";
 
     let client = natUpnp.createClient();
     client.portMapping({
         public: master_server_port,
         private: master_server_port,
         ttl: 10
-    }, function(err) {
-        if (err){
+    }, function (err) {
+        if (err) {
             console.log("Please open port " + master_server_port + " on your router in order to host a game.")
-        }else{
+        } else {
             console.log("Port opened successfully!")
         }
     });
 
-    const wss = new WebSocket.Server({ port: master_server_port });
-
-    wss.broadcast = function broadcast(data) {
-        wss.clients.forEach(function each(client) {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(data);
-            }
-        });
-    };
+    const wss = new WebSocket.Server({port: master_server_port});
 
     wss.on('connection', function connection(ws) {
-        ws.on('message', function incoming(message) {
-            wss.broadcast(message);
+        ws.on('message', function incoming(data) {
+            wss.clients.forEach(function each(client) {
+                if (client !== ws && client.readyState === WebSocket.OPEN) {
+                    client.send(data);
+                }
+            });
         });
     });
 }
 
-function setupClient(){
+function setupClient() {
     console.log("Setting up client...");
     const ws = new WebSocket('ws://' + master_server_ip + ":" + master_server_port);
-    ws.on('error', function(){
+    ws.on('error', function () {
         console.log("Failed to connect to master server. :(")
     });
 
     ws.on('open', function open() {
-        try{
+        try {
             console.log("Connected to master server!");
             sendJustText("Connected to master server!");
             websocket = ws;
-        }catch(err){
-            if (err){
+        } catch (err) {
+            if (err) {
                 console.log(err);
             }
         }
@@ -94,24 +91,21 @@ function setupClient(){
 
     ws.on('message', function incoming(data) {
         let parse = JSON.parse(lzw.decode(data));
-        let check_flag = parse.uuid !== my_uuid;
-        if (check_flag){
-            let incoming = parse.payload;
-            if (incoming.hasOwnProperty("testing_flag")) {
-                sendDataToMaster({testing_response: true, target_uuid: parse.uuid});
-                return;
-            }else if (incoming.hasOwnProperty("testing_response")){
-                sendJustText("Connected to partner: " + parse.nickname);
-                return;
-            }else if (incoming.hasOwnProperty("player_connecting")){
-                send({message: "Player connecting...", player_connecting: true});
-                if (ScarecrowStorage !== null){
-                    send({message: "Querying for Pierre data...", scarecrow: true});
-                }
-                return;
+        let incoming = parse.payload;
+        if (incoming.hasOwnProperty("testing_flag")) {
+            sendDataToMaster({testing_response: true, target_uuid: parse.uuid});
+            return;
+        } else if (incoming.hasOwnProperty("testing_response")) {
+            sendJustText("Connected to partner: " + parse.nickname);
+            return;
+        } else if (incoming.hasOwnProperty("player_connecting")) {
+            send({message: "Player connecting...", player_connecting: true});
+            if (ScarecrowStorage !== null) {
+                send({message: "Querying for Pierre data...", scarecrow: true});
             }
-            processData(incoming, parse.uuid);
+            return;
         }
+        processData(incoming, parse.uuid);
     });
 }
 
@@ -133,7 +127,7 @@ if (isTracker) {
     });
 }
 
-function sendDataToMaster(data){
+function sendDataToMaster(data) {
     websocket.send(lzw.encode(JSON.stringify({uuid: my_uuid, nickname: nickname, payload: data})));
 }
 
@@ -141,10 +135,10 @@ function sendDataToMaster(data){
 let seed = 0;
 let initial_setup_complete = false;
 
-function processData(incoming, uuid){
+function processData(incoming, uuid) {
     let doesUpdate = true;
     if (incoming.hasOwnProperty("scene_data")) {
-        if (!SceneStorage.hasOwnProperty("scene_data")){
+        if (!SceneStorage.hasOwnProperty("scene_data")) {
             doesUpdate = false;
         }
         updateScenes({
@@ -154,7 +148,7 @@ function processData(incoming, uuid){
         })
     }
     else if (incoming.hasOwnProperty("flag_data")) {
-        if (!FlagStorage.hasOwnProperty("flag_data")){
+        if (!FlagStorage.hasOwnProperty("flag_data")) {
             doesUpdate = false;
         }
         Object.keys(incoming.flag_data).forEach(function (key) {
@@ -162,7 +156,7 @@ function processData(incoming, uuid){
         });
     }
     else if (incoming.hasOwnProperty("skulltulas")) {
-        if (!SkulltulaStorage.hasOwnProperty("skulltulas")){
+        if (!SkulltulaStorage.hasOwnProperty("skulltulas")) {
             doesUpdate = false;
         }
         Object.keys(incoming.skulltulas).forEach(function (key) {
@@ -172,29 +166,29 @@ function processData(incoming, uuid){
         // NYI
     } else if (incoming.hasOwnProperty("scarecrow_data")) {
         updateScarecrow({uuid: uuid, payload: incoming});
-    }else if (incoming.hasOwnProperty("bottle")){
+    } else if (incoming.hasOwnProperty("bottle")) {
         updateInventory({uuid: uuid, data: incoming.bottle});
     } else {
         if (OotStorage == null && !initial_setup_complete && uuid === my_uuid) {
             sendJustText("Loading initial game state...");
-            OotStorage = {};
+            OotStorage = incoming;
             updateBundles({uuid: uuid, data: incoming});
             updateInventory({uuid: uuid, data: incoming});
             overlayHandler(incoming);
             sendJustText("Checking for partner connection...");
             let test = {testing_flag: true};
             sendDataToMaster(test);
-            setTimeout(function(){
-                if (!isMaster){
+            setTimeout(function () {
+                if (!isMaster) {
                     sendJustText("Sending sync request...");
-                    initial_setup_complete = true;
                     sendDataToMaster({player_connecting: true});
                 }
+                initial_setup_complete = true;
             }, 10000);
             doesUpdate = false;
             return doesUpdate;
-        }else{
-            if (initial_setup_complete){
+        } else {
+            if (initial_setup_complete) {
                 updateInventory({uuid: uuid, data: incoming});
                 updateBundles({uuid: uuid, data: incoming});
                 overlayHandler(incoming);
@@ -210,16 +204,16 @@ function parseData(data) {
         unpack = JSON.parse(data);
         let decode = Buffer.from(unpack.data, 'base64');
         let incoming = JSON.parse(decode);
-        if (incoming.hasOwnProperty("seed")){
+        if (incoming.hasOwnProperty("seed")) {
             seed = incoming.seed;
             console.log("Randomizer seed: " + seed);
             return;
         }
-        if (processData(incoming, my_uuid)){
+        if (processData(incoming, my_uuid)) {
             sendDataToMaster(incoming);
         }
     } catch (err) {
-        if (err){
+        if (err) {
             console.log(err);
             console.log("---------------------");
             console.log("Something went wrong!");
@@ -239,27 +233,27 @@ let zServer = net.createServer(function (socket) {
     setupClient();
     socket.setEncoding('ascii');
     socket.on('data', function (data) {
-        try{
+        try {
             let dataStream = data.split("\r\n");
             for (let i = 0; i < dataStream.length; i++) {
                 if (dataStream[i] === "") {
                     continue;
                 }
                 // This shit literally only triggers on Pierre's data because its comically huge by Oot standards.
-                if (dataStream[i].indexOf("}") === -1){
+                if (dataStream[i].indexOf("}") === -1) {
                     // Incomplete data.
                     packet_buffer = dataStream[i];
                     continue;
-                }else if (dataStream[i].indexOf("{") === -1){
+                } else if (dataStream[i].indexOf("{") === -1) {
                     // This must be the other half.
-                    packet_buffer+= dataStream[i];
-                }else{
+                    packet_buffer += dataStream[i];
+                } else {
                     packet_buffer = dataStream[i];
                 }
                 parseData(packet_buffer);
             }
-        }catch(err){
-            if (err){
+        } catch (err) {
+            if (err) {
                 console.log(err);
                 console.log("---------------------");
                 console.log("Something went wrong!");
@@ -295,18 +289,18 @@ function sendJustText(text) {
 
 let key_translations = {};
 
-function registerKeyTranslation(key, translation){
+function registerKeyTranslation(key, translation) {
     key_translations[key] = translation;
 }
 
-function getKeyTranslation(key, int){
-    if (key_translations.hasOwnProperty(key)){
+function getKeyTranslation(key, int) {
+    if (key_translations.hasOwnProperty(key)) {
         if (typeof key_translations[key] === 'function') {
             return key_translations[key](int);
-        }else{
+        } else {
             return key_translations[key];
         }
-    }else{
+    } else {
         return key;
     }
 }
@@ -331,35 +325,58 @@ registerKeyTranslation("green", "Kokiri Tunic");
 registerKeyTranslation("red", "Goron Tunic");
 registerKeyTranslation("blue", "Zora Tunic");
 
-registerKeyTranslation("ctrade", function(int){
-    switch(int){
-        case 33: return "Egg (Child)";
-        case 34: return "Cucco (Child)";
-        case 35: return "Zelda's Letter";
-        case 36: return "Keaton Mask";
-        case 37: return "Skull Mask";
-        case 38: return "Spooky Mask";
-        case 39: return "Bunny Hood";
-        case 40: return "Goron Mask";
-        case 41: return "Zora Mask";
-        case 42: return "Gerudo Mask";
-        case 43: return "Mask of Truth";
-        case 44: return "Sold Out";
+registerKeyTranslation("ctrade", function (int) {
+    switch (int) {
+        case 33:
+            return "Egg (Child)";
+        case 34:
+            return "Cucco (Child)";
+        case 35:
+            return "Zelda's Letter";
+        case 36:
+            return "Keaton Mask";
+        case 37:
+            return "Skull Mask";
+        case 38:
+            return "Spooky Mask";
+        case 39:
+            return "Bunny Hood";
+        case 40:
+            return "Goron Mask";
+        case 41:
+            return "Zora Mask";
+        case 42:
+            return "Gerudo Mask";
+        case 43:
+            return "Mask of Truth";
+        case 44:
+            return "Sold Out";
     }
 });
-registerKeyTranslation("atrade", function(int){
-    switch(int){
-        case 45: return "Egg (Adult)";
-        case 46: return "Chicken (Adult)";
-        case 47: return "Cojiro";
-        case 48: return "Odd Mushroom";
-        case 49: return "Odd Potion";
-        case 50: return "Poacher's Saw";
-        case 51: return "Broken Sword";
-        case 52: return "Prescription";
-        case 53: return "Eyeball Frog";
-        case 54: return "Eye Drops";
-        case 55: return "Claim Check";
+registerKeyTranslation("atrade", function (int) {
+    switch (int) {
+        case 45:
+            return "Egg (Adult)";
+        case 46:
+            return "Chicken (Adult)";
+        case 47:
+            return "Cojiro";
+        case 48:
+            return "Odd Mushroom";
+        case 49:
+            return "Odd Potion";
+        case 50:
+            return "Poacher's Saw";
+        case 51:
+            return "Broken Sword";
+        case 52:
+            return "Prescription";
+        case 53:
+            return "Eyeball Frog";
+        case 54:
+            return "Eye Drops";
+        case 55:
+            return "Claim Check";
     }
 });
 registerKeyTranslation("ocarina", "Ocarina");
@@ -367,33 +384,48 @@ registerKeyTranslation("lens", "Lens of Truth");
 registerKeyTranslation("stick", "Deku Stick");
 registerKeyTranslation("nuts", "Deku Nuts");
 registerKeyTranslation("fwind", "Farore's Wind");
-function bottleTranslation(int){
-    switch(int){
-        case 20: return "Empty Bottle";
-        case 21: return "Red Potion";
-        case 22: return "Green Potion";
-        case 23: return "Blue Potion";
-        case 24: return "Bottled Fairy";
-        case 25: return "Bottled Fish";
-        case 26: return "Bottle of Milk";
-        case 31: return "Bottle of Milk (Half)";
-        case 27: return "Ruto's Letter";
-        case 28: return "Blue Fire";
-        case 29: return "Bottled Bugs";
-        case 30: return "Bottled Poe";
-        case 32: return "Bottled Poe";
+
+function bottleTranslation(int) {
+    switch (int) {
+        case 20:
+            return "Empty Bottle";
+        case 21:
+            return "Red Potion";
+        case 22:
+            return "Green Potion";
+        case 23:
+            return "Blue Potion";
+        case 24:
+            return "Bottled Fairy";
+        case 25:
+            return "Bottled Fish";
+        case 26:
+            return "Bottle of Milk";
+        case 31:
+            return "Bottle of Milk (Half)";
+        case 27:
+            return "Ruto's Letter";
+        case 28:
+            return "Blue Fire";
+        case 29:
+            return "Bottled Bugs";
+        case 30:
+            return "Bottled Poe";
+        case 32:
+            return "Bottled Poe";
     }
 }
-registerKeyTranslation("bottle1", function(int){
+
+registerKeyTranslation("bottle1", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle2", function(int){
+registerKeyTranslation("bottle2", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle3", function(int){
+registerKeyTranslation("bottle3", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle4", function(int){
+registerKeyTranslation("bottle4", function (int) {
     return bottleTranslation(int);
 });
 registerKeyTranslation("iarrow", "Ice Arrows");
@@ -407,10 +439,12 @@ registerKeyTranslation("bombchu", "Bombchus");
 registerKeyTranslation("bombs", "Bombs");
 registerKeyTranslation("dins", "Din's Fire");
 registerKeyTranslation("slingshot", "Slingshot");
-registerKeyTranslation("hookshot", function(int){
-    switch(int){
-        case 10: return "Hookshot";
-        case 11: return "Longshot";
+registerKeyTranslation("hookshot", function (int) {
+    switch (int) {
+        case 10:
+            return "Hookshot";
+        case 11:
+            return "Longshot";
     }
 });
 registerKeyTranslation("beans", "Magic Beans");
@@ -419,11 +453,14 @@ registerKeyTranslation("biggeron_flag", "Biggoron's Sword");
 registerKeyTranslation("defense", "Enhanced Defense");
 registerKeyTranslation("hearts", "Heart Container");
 registerKeyTranslation("magic_size", "Enhanced Magic Meter");
-registerKeyTranslation("magic_limit", function(data){
-    switch(data){
-        case 30: return "Standard Magic Meter Capacity";
-        case 60: return "Enhanced Magic Meter Capacity";
-        default: return "";
+registerKeyTranslation("magic_limit", function (data) {
+    switch (data) {
+        case 30:
+            return "Standard Magic Meter Capacity";
+        case 60:
+            return "Enhanced Magic Meter Capacity";
+        default:
+            return "";
     }
 });
 
@@ -433,19 +470,19 @@ function overlayHandler(data) {
 
 let int_special_handlers = {};
 
-function registerSpecialIntHandler(key, callback){
+function registerSpecialIntHandler(key, callback) {
     int_special_handlers[key] = callback;
     //console.log("Registered int handler for key " + key + ".");
 }
 
-registerSpecialIntHandler("magic_size", function(key, pack){
+registerSpecialIntHandler("magic_size", function (key, pack) {
     if (my_uuid !== pack["uuid"]) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x60}};
         send(r2);
     }
 });
 
-registerSpecialIntHandler("hearts", function(key, pack){
+registerSpecialIntHandler("hearts", function (key, pack) {
     if (my_uuid !== pack["uuid"]) {
         let r2 = {
             message: "Filling up your health due to gaining a heart container...",
@@ -458,10 +495,10 @@ registerSpecialIntHandler("hearts", function(key, pack){
 function intHandler(pack) {
     let data = pack.data;
     let flag = false;
-    try{
+    try {
         Object.keys(int_keys).forEach(function (key) {
             let v = int_keys[key];
-            if (!OotStorage.hasOwnProperty(v)){
+            if (!OotStorage.hasOwnProperty(v)) {
                 OotStorage[v] = data[v];
                 OotOverlay_data[v] = OotStorage[v];
             }
@@ -474,13 +511,13 @@ function intHandler(pack) {
                     send(r);
                 }
                 OotOverlay_data[v] = OotStorage[v];
-                if (int_special_handlers.hasOwnProperty(v)){
+                if (int_special_handlers.hasOwnProperty(v)) {
                     int_special_handlers[v](v, pack);
                 }
             }
         });
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -489,12 +526,12 @@ function intHandler(pack) {
 
 let bool_special_handlers = {};
 
-function registerSpecialBoolHandler(key, callback){
+function registerSpecialBoolHandler(key, callback) {
     bool_special_handlers[key] = callback;
     //console.log("Registered bool handler for key " + key + ".");
 }
 
-registerSpecialBoolHandler("magic_bool", function(key, pack){
+registerSpecialBoolHandler("magic_bool", function (key, pack) {
     if (my_uuid !== pack["uuid"]) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x30}};
         send(r2);
@@ -504,13 +541,9 @@ registerSpecialBoolHandler("magic_bool", function(key, pack){
 function boolHandler(pack) {
     let flag = false;
     let data = pack.data;
-    try{
+    try {
         Object.keys(boolean_keys).forEach(function (key) {
             let v = boolean_keys[key];
-            if (!OotStorage.hasOwnProperty(v)){
-                OotStorage[v] = data[v];
-                OotOverlay_data[v] = (OotStorage[v] === 1);
-            }
             if ((OotStorage[v] === 0 && data[v] !== 0)) {
                 flag = true;
                 OotStorage[v] = data[v];
@@ -520,13 +553,13 @@ function boolHandler(pack) {
                     send(r);
                 }
                 OotOverlay_data[v] = (OotStorage[v] === 1);
-                if (bool_special_handlers.hasOwnProperty(v)){
+                if (bool_special_handlers.hasOwnProperty(v)) {
                     bool_special_handlers[v](v, pack);
                 }
             }
         });
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -536,21 +569,12 @@ function boolHandler(pack) {
 function genericBundleHandler(pack, keyMap, storageKey) {
     let flag = false;
     let data = pack.data;
-    try{
-        if (!OotStorage.hasOwnProperty(storageKey)){
+    try {
+        if (!OotStorage.hasOwnProperty(storageKey)) {
             OotStorage[storageKey] = [];
         }
         Object.keys(keyMap).forEach(function (key) {
             let bit = keyMap[key];
-            if (OotStorage[storageKey][bit] === void 0){
-                OotStorage[storageKey][bit] = data[storageKey][bit];
-                if (OotStorage[storageKey][bit] === 1) {
-                    console.log("Yes " + key);
-                    OotOverlay_data[key] = true;
-                } else {
-                    console.log("No " + key);
-                }
-            }
             if ((OotStorage[storageKey][bit] === 0 && data[storageKey][bit] === 1)) {
                 flag = true;
                 OotStorage[storageKey][bit] = data[storageKey][bit];
@@ -567,8 +591,8 @@ function genericBundleHandler(pack, keyMap, storageKey) {
                 }
             }
         });
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
             console.log(pack);
         }
@@ -616,20 +640,11 @@ let upgrade_amount_overrides = {};
 function genericUpgradeHandler(pack, targets, storageKey, payloads) {
     let flag = false;
     let data = pack.data;
-    try{
+    try {
         Object.keys(targets).forEach(function (key) {
             let current = [];
             let incoming = [];
-            let override = false;
-            if (!OotStorage.hasOwnProperty(storageKey)){
-                OotStorage[storageKey] = [];
-                override = true;
-            }
             targets[key].forEach(function (value) {
-                if (OotStorage[storageKey][value] === void 0){
-                    OotStorage[storageKey][value] = data[storageKey][value];
-                    override = true;
-                }
                 current.push(Number(OotStorage[storageKey][value]));
                 incoming.push(Number(data[storageKey][value]));
             });
@@ -644,7 +659,7 @@ function genericUpgradeHandler(pack, targets, storageKey, payloads) {
                     theirLevel = key2;
                 }
             });
-            if ((Number(theirLevel) > Number(ourLevel)) || override) {
+            if ((Number(theirLevel) > Number(ourLevel))) {
                 let startingBit = 0;
                 targets[key].forEach(function (value) {
                     OotStorage[storageKey][value] = incoming[startingBit];
@@ -654,25 +669,28 @@ function genericUpgradeHandler(pack, targets, storageKey, payloads) {
                 console.log(key + " " + theirLevel);
                 if (my_uuid !== pack["uuid"]) {
                     let k = key + " " + theirLevel;
-                    let r = {message: "Received " + getKeyTranslation(key + "_u", Number(theirLevel)) + ".", payload: {}};
+                    let r = {
+                        message: "Received " + getKeyTranslation(key + "_u", Number(theirLevel)) + ".",
+                        payload: {}
+                    };
                     r.payload[storageKey] = OotStorage[storageKey];
                     if (!upgrade_no_increase.contains(k)) {
                         r.payload[key + "_count"] = Number(theirLevel);
-                        if (upgrade_amount_overrides.hasOwnProperty(key)){
-                            if (upgrade_amount_overrides[key].hasOwnProperty(theirLevel)){
+                        if (upgrade_amount_overrides.hasOwnProperty(key)) {
+                            if (upgrade_amount_overrides[key].hasOwnProperty(theirLevel)) {
                                 r.payload[key + "_count"] = Number(upgrade_amount_overrides[key][Number(theirLevel)]);
                             }
                         }
                     }
                     send(r);
                 }
-                if (theirLevel > 0 || override) {
+                if (theirLevel > 0) {
                     OotOverlay_data[key + "_upgrade"] = theirLevel;
                 }
             }
         });
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -697,40 +715,48 @@ let upgrade_2_payloads = {
     scale: {0: [0, 0], 1: [0, 1], 2: [1, 0]}
 };
 
-registerKeyTranslation("nuts_u", function(value){
+registerKeyTranslation("nuts_u", function (value) {
     return "Deku Nut Upgrade (" + value + ")"
 });
-registerKeyTranslation("stick_u", function(value){
+registerKeyTranslation("stick_u", function (value) {
     return "Deku Stick Upgrade (" + value + ")";
 });
-registerKeyTranslation("strength_u", function(value){
+registerKeyTranslation("strength_u", function (value) {
     console.log("strength_u " + value);
-    switch(value){
-        case 1: return "Goron Braclet";
-        case 2: return "Silver Gauntlets";
-        case 3: return "Golden Gauntlets";
+    switch (value) {
+        case 1:
+            return "Goron Braclet";
+        case 2:
+            return "Silver Gauntlets";
+        case 3:
+            return "Golden Gauntlets";
     }
 });
-registerKeyTranslation("bomb_u", function(value){
+registerKeyTranslation("bomb_u", function (value) {
     return "Bomb Bag (" + value + ")";
 });
-registerKeyTranslation("arrows_u", function(value){
+registerKeyTranslation("arrows_u", function (value) {
     return "Quiver (" + value + ")";
 });
-registerKeyTranslation("bullet_u", function(value){
+registerKeyTranslation("bullet_u", function (value) {
     return "Bullet Bag (" + value + ")";
 });
-registerKeyTranslation("wallet_u", function(value){
-    switch(value){
-        case 99: return "Wallet";
-        case 200: return "Adult's Wallet";
-        case 500: return "Giant's Wallet";
+registerKeyTranslation("wallet_u", function (value) {
+    switch (value) {
+        case 99:
+            return "Wallet";
+        case 200:
+            return "Adult's Wallet";
+        case 500:
+            return "Giant's Wallet";
     }
 });
-registerKeyTranslation("scale_u", function(value){
-    switch(value){
-        case 1: return "Silver Scale";
-        case 2: return "Golden Scale";
+registerKeyTranslation("scale_u", function (value) {
+    switch (value) {
+        case 1:
+            return "Silver Scale";
+        case 2:
+            return "Golden Scale";
     }
 });
 
@@ -755,7 +781,16 @@ function upgrade_handler(data) {
     return flag;
 }
 
-let quest_1_targets = {song_of_time: 7, song_of_storms: 6, emerald: 5, ruby: 4, sapphire: 3, stone: 2, card: 1, skulltula_flag: 0};
+let quest_1_targets = {
+    song_of_time: 7,
+    song_of_storms: 6,
+    emerald: 5,
+    ruby: 4,
+    sapphire: 3,
+    stone: 2,
+    card: 1,
+    skulltula_flag: 0
+};
 let quest_2_targets = {serenade: 7, requiem: 6, nocturn: 5, prelude: 4, lullaby: 3, epona: 2, saria: 1, sun: 0};
 let quest_3_targets = {forest: 7, fire: 6, water: 5, spirit: 4, shadow: 3, light: 2, minuet: 1, bolero: 0};
 
@@ -764,7 +799,7 @@ registerKeyTranslation("song_of_storms", "Song of Storms");
 registerKeyTranslation("emerald", "Kokiri Emerald");
 registerKeyTranslation("ruby", "Goron Ruby");
 registerKeyTranslation("sapphire", "Zora's Sapphire");
-registerKeyTranslation("stone","Stone of Agony");
+registerKeyTranslation("stone", "Stone of Agony");
 registerKeyTranslation("card", "Gerudo Membership Card");
 registerKeyTranslation("skulltula_flag", "Skulltulas");
 registerKeyTranslation("serenade", "Serenade of Water");
@@ -799,13 +834,14 @@ function quest_handler(data) {
 }
 
 let inventory_special_handlers = {};
-function registerInventoryHandler(key, callback){
+
+function registerInventoryHandler(key, callback) {
     inventory_special_handlers[key] = callback;
     //console.log("Registered inventory handler for key " + key + ".");
 }
 
-registerInventoryHandler("basic_handler", function(key, value, data){
-    if (value === inventory_blank && data[key] !== inventory_blank){
+registerInventoryHandler("basic_handler", function (key, value, data) {
+    if (value === inventory_blank && data[key] !== inventory_blank) {
         return true;
     }
     return value !== inventory_blank && (data[key] > value && data[key] !== inventory_blank);
@@ -813,17 +849,17 @@ registerInventoryHandler("basic_handler", function(key, value, data){
 
 let child_trade_status = 0;
 
-registerInventoryHandler("ctrade", function(key, value, data){
-    if (value === inventory_blank){
+registerInventoryHandler("ctrade", function (key, value, data) {
+    if (value === inventory_blank) {
         child_trade_status = data[key];
         return inventory_special_handlers["basic_handler"](key, value, data);
-    }else{
-        if (child_trade_status === 0){
+    } else {
+        if (child_trade_status === 0) {
             child_trade_status = OotStorage[key];
             console.log("Child trade quest set to " + child_trade_status + ".");
         }
-        if (value !== inventory_blank && data[key] > value && child_trade_status < data[key] && data[key] !== inventory_blank){
-            if (data[key] !== 44){
+        if (value !== inventory_blank && data[key] > value && child_trade_status < data[key] && data[key] !== inventory_blank) {
+            if (data[key] !== 44) {
                 // mask is newer but not sold out.
                 child_trade_status = data[key];
                 console.log("Child trade quest advanced to " + child_trade_status + ".");
@@ -834,8 +870,8 @@ registerInventoryHandler("ctrade", function(key, value, data){
     return false;
 });
 
-function bottleHandler(key, value, data){
-    if (value === inventory_blank){
+function bottleHandler(key, value, data) {
+    if (value === inventory_blank) {
         return inventory_special_handlers["basic_handler"](key, value, data);
     }
     return value !== inventory_blank && value !== data[key] && data[key] !== inventory_blank;
@@ -848,44 +884,44 @@ registerInventoryHandler("bottle4", bottleHandler);
 
 let inventory_amount_handlers = {};
 
-function registerInventoryAmountHandler(key, callback){
+function registerInventoryAmountHandler(key, callback) {
     inventory_amount_handlers[key] = callback;
     //console.log("Registered inventory # handler for key " + key + ".");
 }
 
-registerInventoryAmountHandler("bombchu", function(){
+registerInventoryAmountHandler("bombchu", function () {
     return 10;
 });
 
-function updateInventory(pack){
+function updateInventory(pack) {
     let data = pack.data;
-    try{
+    try {
         Object.keys(data).forEach(function (k) {
             // The idea here is the client can send incomplete inventory updates when necessary.
             // Check the incoming packet against the valid inventory array. If indexOf is -1 the data is useless and should be discarded.
             // This can happen when something changes that we know about but don't necessarily care about right now like bomb count.
             let key = inventory_keys.indexOf(k);
-            if (key === -1){
+            if (key === -1) {
                 // return is more or less 'continue' when in JS foreach loops...
                 return;
             }
-            if (!OotStorage.hasOwnProperty(inventory_keys[key])){
+            if (!OotStorage.hasOwnProperty(inventory_keys[key])) {
                 OotStorage[inventory_keys[key]] = data[inventory_keys[key]];
                 console.log("Setting value for inventory key: " + inventory_keys[key] + ".");
                 OotOverlay_data[inventory_keys[key]] = data[inventory_keys[key]];
             }
             let val = OotStorage[inventory_keys[key]];
             let handler = "basic_handler";
-            if (inventory_special_handlers.hasOwnProperty(inventory_keys[key])){
+            if (inventory_special_handlers.hasOwnProperty(inventory_keys[key])) {
                 handler = inventory_keys[key];
             }
-            if (inventory_special_handlers[handler](inventory_keys[key], val, data)){
+            if (inventory_special_handlers[handler](inventory_keys[key], val, data)) {
                 OotStorage[inventory_keys[key]] = data[inventory_keys[key]];
                 val = OotStorage[inventory_keys[key]];
                 if (my_uuid !== pack["uuid"]) {
                     let r = {message: "Received " + getKeyTranslation(inventory_keys[key], val) + ".", payload: {}};
                     r.payload[inventory_keys[key]] = data[inventory_keys[key]];
-                    if (inventory_amount_handlers.hasOwnProperty(inventory_keys[key])){
+                    if (inventory_amount_handlers.hasOwnProperty(inventory_keys[key])) {
                         r.payload[inventory_keys[key] + "_count"] = inventory_amount_handlers[inventory_keys[key]]();
                     }
                     console.log(r);
@@ -896,8 +932,8 @@ function updateInventory(pack){
                 }
             }
         });
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -973,7 +1009,7 @@ function updateScenes(data) {
     }
     let flag = false;
     let list = [];
-    try{
+    try {
         Object.keys(SceneStorage["scene_data"][data.addr]).forEach(function (k2) {
             for (let i = 0; i < SceneStorage["scene_data"][data.addr][k2].length; i++) {
                 if (SceneStorage["scene_data"][data.addr][k2][i] === 0 && data["scene_data"][k2][i] === 1) {
@@ -999,8 +1035,8 @@ function updateScenes(data) {
                 console.log(list[i]);
             }
         }
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -1020,7 +1056,7 @@ function updateSkulltulas(s) {
     }
     let list = [];
     let update_required = false;
-    try{
+    try {
         for (let i = 0; i < SkulltulaStorage.skulltulas[s.addr].length; i++) {
             if (SkulltulaStorage.skulltulas[s.addr][i] === 0 && s.data[i] === 1) {
                 SkulltulaStorage.skulltulas[s.addr][i] = s.data[i];
@@ -1061,8 +1097,8 @@ function updateSkulltulas(s) {
                 console.log(list[k]);
             }
         }
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -1078,46 +1114,46 @@ function createFlagEventTrigger(addr, callback) {
 
 createFlagEventTrigger("0x11b4b6", function (data) {
     // This is the flag when a player talks to Pierre as adult after having talked to him as child.
-    if (data.data[3] === 1){
+    if (data.data[3] === 1) {
         if (data["uuid"] === my_uuid) {
             sendJustText("Scarecrow's song detected.");
             sendJustText("Incoming lag spike.");
-            setTimeout(function(){
+            setTimeout(function () {
                 send({message: "Querying for Pierre data...", scarecrow: true});
             }, 30000);
         }
     }
 });
 
-createFlagEventTrigger("0x11b4a6", function(data){
+createFlagEventTrigger("0x11b4a6", function (data) {
     // This is Epona.
-    if (data.data[7] === 1){
+    if (data.data[7] === 1) {
         if (data["uuid"] !== my_uuid) {
             sendJustText("Your partner acquired Epona.");
             sendJustText("If she won't come when you play the song...");
             sendJustText("... enter and exit Lon Lon Ranch.")
-        }else{
+        } else {
             sendJustText("Epona acquired.");
         }
     }
 });
 
 function updateScarecrow(data) {
-    try{
-        if (ScarecrowStorage === null){
+    try {
+        if (ScarecrowStorage === null) {
             ScarecrowStorage = {};
             ScarecrowStorage = data.payload.scarecrow_data;
             if (data["uuid"] !== my_uuid) {
                 sendJustText("Scarecrow's song detected.");
                 sendJustText("Incoming lag spike.");
-                setTimeout(function(){
+                setTimeout(function () {
                     send({message: "Updating Pierre data...", pierre: ScarecrowStorage});
                     sendJustText("Save warp required to enable Pierre.");
                 }, 30000);
             }
         }
-    }catch(err){
-        if (err){
+    } catch (err) {
+        if (err) {
             console.log(err);
         }
     }
@@ -1135,7 +1171,7 @@ function updateFlags(flag) {
     }
     let list = [];
     let update_required = false;
-    try{
+    try {
         for (let i = 0; i < FlagStorage["flag_data"][flag.addr].length; i++) {
             if (FlagStorage["flag_data"][flag.addr][i] === 0 && flag.data[i] === 1) {
                 FlagStorage["flag_data"][flag.addr][i] = flag.data[i];
@@ -1158,7 +1194,7 @@ function updateFlags(flag) {
                 flag_event_triggers[flag.addr](flag);
             }
         }
-    }catch(err){
+    } catch (err) {
         console.log(err);
     }
     return update_required;
