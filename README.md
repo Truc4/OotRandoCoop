@@ -35,6 +35,9 @@ This program synchronizes the data of two copies of The Legend of Zelda: Ocarina
 - A: Whoever starts the Scarecrow quest must be the one who finishes it to unlock Pierre.
 
 #### Installation and usage
+**YOU MUST BE USING BIZHAWK 2.3 OR HIGHER. YES, IT WILL CRASH IF YOU TRY OLDER VERSIONS.
+**
+
 The node side of this project can be run directly should you have it. Otherwise we offer precompiled binaries made using [pkg](https://github.com/zeit/pkg "pkg") that contain everything you need for Windows, Linux, and Mac. Get them on the release page.
 
 Download the package for your operating system and extract it in your BizHawk folder (same level as the executable EmuHawk). Everything is already placed within the zip to end up in the correct place.
