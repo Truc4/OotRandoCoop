@@ -323,7 +323,7 @@ let ScarecrowStorage = null;
 let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "bottle1", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bottle2", "bombchu", "bombs", "bottle4", "bottle3", "dins", "slingshot", "hookshot", "beans"];
 let inventory_blank = 255;
 let boolean_keys = ["magic_bool", "biggeron_flag", "defense"];
-let int_keys = ["hearts", "magic_size"];
+let int_keys = ["hearts", "magic_size", "magic_limit"];
 
 let tunic_targets = {green: 7, red: 6, blue: 5};
 
@@ -419,6 +419,13 @@ registerKeyTranslation("biggeron_flag", "Biggoron's Sword");
 registerKeyTranslation("defense", "Enhanced Defense");
 registerKeyTranslation("hearts", "Heart Container");
 registerKeyTranslation("magic_size", "Enhanced Magic Meter");
+registerKeyTranslation("magic_limit", function(data){
+    switch(data){
+        case 30: return "Standard Magic Meter Capacity";
+        case 60: return "Enhanced Magic Meter Capacity";
+        default: return "";
+    }
+});
 
 function overlayHandler(data) {
     OotOverlay_data["skull_tokens_count"] = data["skull_tokens_count"];
@@ -433,10 +440,6 @@ function registerSpecialIntHandler(key, callback){
 
 registerSpecialIntHandler("magic_size", function(key, pack){
     if (my_uuid !== pack["uuid"]) {
-        sendJustText("You have received enhanced magic.");
-        sendJustText("You will need to save warp before it works properly...");
-        sendJustText("... if you weren't the one who picked it up.");
-        sendJustText("Sorry. :(");
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x60}};
         send(r2);
     }
@@ -505,7 +508,6 @@ function boolHandler(pack) {
         Object.keys(boolean_keys).forEach(function (key) {
             let v = boolean_keys[key];
             if (!OotStorage.hasOwnProperty(v)){
-                console.log("!");
                 OotStorage[v] = data[v];
                 OotOverlay_data[v] = (OotStorage[v] === 1);
             }

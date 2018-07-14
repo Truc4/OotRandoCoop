@@ -33,7 +33,7 @@ function sendPacket(id, data)
         end
     end
     local base = to_base64(d);
-    comm.socketServerSend(json.encode({packet_id=id, data=base}) .. "\r\n");
+    comm.socketServerSend(json.encode({ packet_id = id, data = base }) .. "\r\n");
     packet_cache[id] = d;
 end
 
@@ -52,6 +52,7 @@ memory_lookup.magic_bool = 0x11A60A;
 -- This address isn't the one listed in the memory maps, but it actually does work so long as you save-warp after setting it.
 memory_lookup.magic_size = 0x11A60C;
 memory_lookup.magic_pool = 0x11A603;
+memory_lookup.magic_limit = 0x11B9C4;
 
 -- inventory
 memory_lookup.stick = 0x11A644;
@@ -121,7 +122,7 @@ current_data = {};
 function toBits(num, bits)
     -- returns a table of bits, most significant first.
     bits = bits or math.max(1, select(2, math.frexp(num)))
-    local t = {} -- will contain the bits        
+    local t = {} -- will contain the bits
     for b = bits, 1, -1 do
         t[b] = math.fmod(num, 2)
         num = math.floor((num - t[b]) / 2)
@@ -248,11 +249,13 @@ read_handlers["hearts"] = twoByteReadHandler;
 read_handlers["time_of_day"] = twoByteReadHandler;
 read_handlers["rupee_count"] = twoByteReadHandler;
 read_handlers["heal"] = twoByteReadHandler;
+read_handlers["magic_limit"] = twoByteReadHandler;
 
 write_handlers["hearts"] = twoByteWriteHandler;
 write_handlers["time_of_day"] = twoByteWriteHandler;
 write_handlers["rupee_count"] = twoByteWriteHandler;
 write_handlers["heal"] = twoByteWriteHandler;
+write_handlers["magic_limit"] = twoByteWriteHandler;
 
 write_handlers["tunics"] = bundleWriteHandler;
 write_handlers["swords"] = bundleWriteHandler;
@@ -391,6 +394,7 @@ function dumpSaveFile()
     local save_me = serializeDump(0, save);
     writeFile("save_file.json", save_me);
 end
+
 -- ========
 
 -- Bottles need to each be on their own packet. Grouping them with the inventory causes desyncs.
@@ -399,7 +403,7 @@ function updateBottles()
         local memdump = readByte(v);
         local payload = {};
         payload[k] = memdump;
-        sendPacket("bottle", {bottle=payload});
+        sendPacket("bottle", { bottle = payload });
     end
 end
 
@@ -422,16 +426,16 @@ end
 -- Why does Pierre take up so much goddamn memory? Holy crap.
 scarecrow_offsets = {
     scarecrow_offset_1 = {
-        offset=0x0F40,
-        size=0x0364
+        offset = 0x0F40,
+        size = 0x0364
     },
     scarecrow_offset_2 = {
-        offset=0x12C4,
-        size=0x0080
+        offset = 0x12C4,
+        size = 0x0080
     },
     scarecrow_offset_3 = {
-        offset=0x1344,
-        size=0x0004
+        offset = 0x1344,
+        size = 0x0004
     }
 };
 
@@ -442,7 +446,7 @@ function dumpScarecrow()
         local memdump = memory.readbyterange(addr, v.size);
         sc_Data[k] = serializeDump(addr, memdump);
     end
-    sendPacket("scarecrow", {scarecrow_data=sc_Data});
+    sendPacket("scarecrow", { scarecrow_data = sc_Data });
 end
 
 function writeScarecrow(data)
@@ -494,12 +498,12 @@ function dumpDungeonData()
         local memdump = readByte(addr);
         d_data[v] = memdump;
     end
-    sendPacket("dungeon", {dungeon = d_data})
+    sendPacket("dungeon", { dungeon = d_data })
 end
 
 function dumpDungeonKeys(index)
     local memdump = readByte(tonumber(small_keys[index]));
-    sendPacket("small_keys", {dungeon_key=index, dungeon_key_payload=memdump});
+    sendPacket("small_keys", { dungeon_key = index, dungeon_key_payload = memdump });
 end
 
 function writeSkulltulas(packet)
@@ -561,11 +565,11 @@ function updateFlags()
 end
 
 function hex2rgb(hex)
-    hex = hex:gsub("#","")
-    if(string.len(hex) == 3) then
-        return tonumber("0x"..hex:sub(1,1)) * 17, tonumber("0x"..hex:sub(2,2)) * 17, tonumber("0x"..hex:sub(3,3)) * 17
-    elseif(string.len(hex) == 6) then
-        return {r=tonumber("0x"..hex:sub(1,2)), g=tonumber("0x"..hex:sub(3,4)), b=tonumber("0x"..hex:sub(5,6))}
+    hex = hex:gsub("#", "")
+    if (string.len(hex) == 3) then
+        return tonumber("0x" .. hex:sub(1, 1)) * 17, tonumber("0x" .. hex:sub(2, 2)) * 17, tonumber("0x" .. hex:sub(3, 3)) * 17
+    elseif (string.len(hex) == 6) then
+        return { r = tonumber("0x" .. hex:sub(1, 2)), g = tonumber("0x" .. hex:sub(3, 4)), b = tonumber("0x" .. hex:sub(5, 6)) }
     end
 end
 
@@ -609,9 +613,9 @@ function checkForSceneChange()
 end
 
 navi_colors = {
-    ok=hex2rgb("#11b22b"),
-    partial=hex2rgb("#b2ac11"),
-    error=hex2rgb("#b21111")
+    ok = hex2rgb("#11b22b"),
+    partial = hex2rgb("#b2ac11"),
+    error = hex2rgb("#b21111")
 };
 
 local current_navi_index = "error";
@@ -646,7 +650,7 @@ function processPacketBuffer()
             sendMessage(packet.message);
             if (packet.message == "Connected to node!") then
                 current_navi_index = "partial";
-                sendPacket("seed", {seed=seed});
+                sendPacket("seed", { seed = seed });
             elseif (string.match(packet.message, "Connected to partner")) then
                 current_navi_index = "ok";
             end
@@ -745,19 +749,6 @@ while true do
         if (checkLinkStateNoUpdate()) then
             processPacketBuffer();
         end
-        -- This stuff is untested and still janky. Leave it for later.
-        --[[if (checkForSceneChange()) then
-            local d = isSceneDungeon(last_scene);
-            if (d ~= nil) then
-                isInDungeon = true;
-            else
-                if (isInDungeon) then
-                    isInDungeon = false;
-                    dumpDungeonData();
-                    dumpDungeonKeys(d);
-                end
-            end
-        end]]
         if (checkForLinkState()) then
             if (isPacketBufferEmpty()) then
                 sendUpdate();
