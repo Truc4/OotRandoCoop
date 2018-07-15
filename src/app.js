@@ -19,27 +19,38 @@ console.log("Primary testers: Delphirus & Liberalpeacock");
 const restify = require('restify');
 const fs = require("fs");
 const net = require('net');
-const uuidv4 = require('uuid/v4');
-// This is how we tell players apart. This should always be unique.
-const my_uuid = uuidv4() + "-" + new Date().getTime();
 const serveStatic = require('serve-static-restify');
 const ini = require('node-ini');
-const WebSocket = require('ws');
 const lzw = require("node-lzw");
 const natUpnp = require('nat-upnp');
+const IO_Server = require('socket.io');
+const IO_Client = require('socket.io-client');
+const hri = require('human-readable-ids').hri;
 
 // Config
 
+// This ID is now assigned by the master server.
+let my_uuid = "";
 let cfg = ini.parseSync('./OotRandoCoop-config.ini');
 let master_server_ip = cfg.Server.master_server_ip;
 let master_server_port = cfg.Server.master_server_port;
 console.log("Master Server IP: " + master_server_ip + ":" + master_server_port);
 let isMaster = cfg.Server.master_server === "true";
 let isTracker = cfg.Tracker.enabled === "true";
+let isClient = cfg.Client.enable_client === "true";
 let nickname = cfg.Client.nickname;
-console.log("My UUID: " + my_uuid);
+let GAME_ROOM = cfg.Client.game_room;
 
 let websocket = null;
+
+function decodeDataFromClient(pack) {
+    return JSON.parse(lzw.decode(pack));
+}
+
+function encodeDataForClient(data) {
+    return lzw.encode(JSON.stringify(data));
+}
+
 if (isMaster) {
     console.log("Setting up master server...");
     master_server_ip = "127.0.0.1";
@@ -57,78 +68,112 @@ if (isMaster) {
         }
     });
 
-    const wss = new WebSocket.Server({port: master_server_port});
+    let ws_server = new IO_Server(master_server_port);
 
-    wss.on('connection', function connection(ws) {
-        ws.on('message', function incoming(data) {
-            wss.clients.forEach(function each(client) {
-                if (client !== ws && client.readyState === WebSocket.OPEN) {
-                    client.send(data);
-                }
-            });
+    ws_server.on('connection', function (socket) {
+        socket.emit('id', encodeDataForClient({id: socket.id}));
+        socket.on('room_request', function (data) {
+            let parse = decodeDataFromClient(data);
+            if (parse.room === "" || parse.room === null) {
+                parse.room = hri.random();
+            }
+            socket.emit('room', encodeDataForClient({room: parse.room}));
+        });
+        socket.on('room', function (data) {
+            let parse = decodeDataFromClient(data);
+            socket.join(parse.room);
+            console.log("Master: Connecting client to room " + parse.room + ".");
+            socket.to(parse.room).emit('client_joined', encodeDataForClient({nickname: parse.nickname}));
+            socket.emit('room_verified', encodeDataForClient({verified: true}));
+        });
+        socket.on('room_check', function (room, data) {
+            socket.to(room).emit('room_check', data);
+        });
+        socket.on('room_check_resp', function (room, data) {
+            let parse = decodeDataFromClient(data);
+            socket.to(parse.toClient).emit('room_check_resp', data);
+        });
+        socket.on('initial_sync', function (room, data) {
+            socket.to(room).emit('initial_sync', data);
+        });
+        socket.on('msg', function (room, data) {
+            socket.to(room).emit('msg', data);
         });
     });
 }
 
 function setupClient() {
     console.log("Setting up client...");
-    const ws = new WebSocket('ws://' + master_server_ip + ":" + master_server_port);
-    ws.on('error', function () {
-        console.log("Failed to connect to master server. :(")
+    websocket = new IO_Client("http://" + master_server_ip + ":" + master_server_port);
+
+    websocket.on('connect', function () {
+        websocket.emit('room_request', encodeDataForClient({room: GAME_ROOM}));
     });
 
-    ws.on('open', function open() {
-        try {
-            console.log("Connected to master server!");
-            sendJustText("Connected to master server!");
-            websocket = ws;
-        } catch (err) {
-            if (err) {
-                console.log(err);
-            }
+    websocket.on('room', function (data) {
+        let parse = decodeDataFromClient(data);
+        GAME_ROOM = parse.room;
+        console.log("Client: Master Server assigned me to room: " + GAME_ROOM + ".");
+        websocket.emit('room', encodeDataForClient({room: GAME_ROOM, nickname: nickname}));
+    });
+
+    websocket.on('room_verified', function (data) {
+        let parse = decodeDataFromClient(data);
+        if (parse.verified) {
+            console.log("Client: Successfully joined room: " + GAME_ROOM + ".");
+            websocket.emit('room_check', GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname}));
         }
     });
 
-    ws.on('message', function incoming(data) {
-        let parse = JSON.parse(lzw.decode(data));
-        let incoming = parse.payload;
-        if (incoming.hasOwnProperty("testing_flag")) {
-            sendDataToMaster({testing_response: true, target_uuid: parse.uuid});
-            return;
-        } else if (incoming.hasOwnProperty("testing_response")) {
-            sendJustText("Connected to partner: " + parse.nickname);
-            return;
-        } else if (incoming.hasOwnProperty("player_connecting")) {
-            send({message: "Player connecting...", player_connecting: true});
-            if (ScarecrowStorage !== null) {
+    websocket.on('id', function (data) {
+        let parse = decodeDataFromClient(data);
+        my_uuid = parse.id;
+        console.log("Client: My UUID: " + my_uuid);
+    });
+
+    websocket.on('client_joined', function (data) {
+        let parse = decodeDataFromClient(data);
+        sendJustText(parse.nickname + " has joined the game!");
+    });
+
+    websocket.on('room_check', function (data) {
+        let parse = decodeDataFromClient(data);
+        websocket.emit('room_check_resp', GAME_ROOM, encodeDataForClient({
+            uuid: my_uuid,
+            nickname: nickname,
+            toClient: parse.uuid
+        }));
+    });
+
+    websocket.on('room_check_resp', function (data) {
+        let parse = decodeDataFromClient(data);
+        sendJustText("Connected player: " + parse.nickname + ".");
+    });
+
+    websocket.on('initial_sync', function (data) {
+        send({message: "Sending initial data to partners...", player_connecting: true});
+        if (hasPierre) {
+            sendJustText("Sending Pierre to new player.");
+            sendJustText("Incoming lag spike.");
+            setTimeout(function () {
                 send({message: "Querying for Pierre data...", scarecrow: true});
-            }
-            return;
+            }, 30000);
         }
+    });
+
+    websocket.on('msg', function (data) {
+        let parse = decodeDataFromClient(data);
+        let incoming = parse.payload;
         processData(incoming, parse.uuid);
     });
 }
 
-server = restify.createServer();
-server.name = "Oot Randomizer Co-op";
-server.use(restify.plugins.bodyParser());
-server.listen(process.env.port || process.env.PORT || 8082, function () {
-    console.log('%s listening to %s', server.name, server.url);
-});
-
-if (isTracker) {
-    console.log("Setting up item tracker...");
-    if (fs.existsSync("./overlay/overlay.html")) {
-        server.pre(serveStatic('./overlay', {'index': ['overlay.html']}));
-    }
-    server.get('/oot/randomizer/data', function (req, res, next) {
-        res.send(OotOverlay_data);
-        next();
-    });
+function sendDataToMaster(data) {
+    websocket.emit('msg', GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname, payload: data}));
 }
 
-function sendDataToMaster(data) {
-    websocket.send(lzw.encode(JSON.stringify({uuid: my_uuid, nickname: nickname, payload: data})));
+function sendDataToMasterOnChannel(channel, data) {
+    websocket.emit(channel, GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname, payload: data}));
 }
 
 // Basic server for talking to Bizhawk.
@@ -137,8 +182,13 @@ let initial_setup_complete = false;
 
 function processData(incoming, uuid) {
     let doesUpdate = true;
+    if (incoming.hasOwnProperty("resync_me")){
+        sendJustText("Sending resync request...");
+        sendDataToMasterOnChannel('initial_sync', {player_connecting: true});
+        return;
+    }
     if (incoming.hasOwnProperty("scene_data")) {
-        if (!SceneStorage.hasOwnProperty("scene_data")) {
+        if (!SceneStorage.hasOwnProperty("scene_data") || !initial_setup_complete) {
             doesUpdate = false;
         }
         updateScenes({
@@ -148,7 +198,7 @@ function processData(incoming, uuid) {
         })
     }
     else if (incoming.hasOwnProperty("flag_data")) {
-        if (!FlagStorage.hasOwnProperty("flag_data")) {
+        if (!FlagStorage.hasOwnProperty("flag_data") || !initial_setup_complete) {
             doesUpdate = false;
         }
         Object.keys(incoming.flag_data).forEach(function (key) {
@@ -156,7 +206,7 @@ function processData(incoming, uuid) {
         });
     }
     else if (incoming.hasOwnProperty("skulltulas")) {
-        if (!SkulltulaStorage.hasOwnProperty("skulltulas")) {
+        if (!SkulltulaStorage.hasOwnProperty("skulltulas") || !initial_setup_complete) {
             doesUpdate = false;
         }
         Object.keys(incoming.skulltulas).forEach(function (key) {
@@ -167,7 +217,11 @@ function processData(incoming, uuid) {
     } else if (incoming.hasOwnProperty("scarecrow_data")) {
         updateScarecrow({uuid: uuid, payload: incoming});
     } else if (incoming.hasOwnProperty("bottle")) {
-        updateInventory({uuid: uuid, data: incoming.bottle});
+        if (initial_setup_complete) {
+            updateInventory({uuid: uuid, data: incoming.bottle});
+        } else {
+            doesUpdate = false;
+        }
     } else {
         if (OotStorage == null && !initial_setup_complete && uuid === my_uuid) {
             sendJustText("Loading initial game state...");
@@ -175,14 +229,9 @@ function processData(incoming, uuid) {
             updateBundles({uuid: uuid, data: incoming});
             updateInventory({uuid: uuid, data: incoming});
             overlayHandler(incoming);
-            sendJustText("Checking for partner connection...");
-            let test = {testing_flag: true};
-            sendDataToMaster(test);
             setTimeout(function () {
-                if (!isMaster) {
-                    sendJustText("Sending sync request...");
-                    sendDataToMaster({player_connecting: true});
-                }
+                sendJustText("Sending sync request...");
+                sendDataToMasterOnChannel('initial_sync', {player_connecting: true});
                 initial_setup_complete = true;
             }, 10000);
             doesUpdate = false;
@@ -230,7 +279,9 @@ let zServer = net.createServer(function (socket) {
     console.log("Connected to BizHawk!");
     emuhawk = socket;
     sendJustText("Connected to node!");
-    setupClient();
+    if (isClient) {
+        setupClient();
+    }
     socket.setEncoding('ascii');
     socket.on('data', function (data) {
         try {
@@ -265,17 +316,35 @@ let zServer = net.createServer(function (socket) {
     });
 });
 
-zServer.listen(1337, '127.0.0.1', function () {
-    console.log("Awaiting connection. Please load the .lua script in Bizhawk.");
-});
-
-server.get('/oot/randomizer/awaiting', function (req, res, next) {
-    res.send(awaiting_send);
-    awaiting_send.length = 0;
-    next();
-});
-
 let awaiting_send = [];
+
+if (isClient) {
+    server = restify.createServer();
+    server.name = "Oot Randomizer Co-op";
+    server.use(restify.plugins.bodyParser());
+    server.listen(process.env.port || process.env.PORT || 8082, function () {
+        console.log('%s listening to %s', server.name, server.url);
+    });
+
+    if (isTracker) {
+        console.log("Setting up item tracker...");
+        if (fs.existsSync("./overlay/overlay.html")) {
+            server.pre(serveStatic('./overlay', {'index': ['overlay.html']}));
+        }
+        server.get('/oot/randomizer/data', function (req, res, next) {
+            res.send(OotOverlay_data);
+            next();
+        });
+    }
+    server.get('/oot/randomizer/awaiting', function (req, res, next) {
+        res.send(awaiting_send);
+        awaiting_send.length = 0;
+        next();
+    });
+    zServer.listen(1337, '127.0.0.1', function () {
+        console.log("Awaiting connection. Please load the .lua script in Bizhawk.");
+    });
+}
 
 function send(data) {
     let json = JSON.stringify(data);
@@ -313,6 +382,7 @@ let FlagStorage = {};
 let SkulltulaStorage = {};
 // Pierre takes up so much space he deserves his own object... lol.
 let ScarecrowStorage = null;
+let hasPierre = false;
 
 let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "bottle1", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bottle2", "bombchu", "bombs", "bottle4", "bottle3", "dins", "slingshot", "hookshot", "beans"];
 let inventory_blank = 255;
@@ -1121,6 +1191,7 @@ createFlagEventTrigger("0x11b4b6", function (data) {
             setTimeout(function () {
                 send({message: "Querying for Pierre data...", scarecrow: true});
             }, 30000);
+            hasPierre = true;
         }
     }
 });
@@ -1140,7 +1211,7 @@ createFlagEventTrigger("0x11b4a6", function (data) {
 
 function updateScarecrow(data) {
     try {
-        if (ScarecrowStorage === null) {
+        if (ScarecrowStorage === null && !hasPierre) {
             ScarecrowStorage = {};
             ScarecrowStorage = data.payload.scarecrow_data;
             if (data["uuid"] !== my_uuid) {
@@ -1149,6 +1220,9 @@ function updateScarecrow(data) {
                 setTimeout(function () {
                     send({message: "Updating Pierre data...", pierre: ScarecrowStorage});
                     sendJustText("Save warp required to enable Pierre.");
+                    sendJustText("Playing the song before save warping...");
+                    sendJustText("... will result in a softlock!");
+                    hasPierre = true;
                 }, 30000);
             }
         }

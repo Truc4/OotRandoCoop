@@ -403,7 +403,7 @@ function updateBottles()
         local memdump = readByte(v);
         local payload = {};
         payload[k] = memdump;
-        sendPacket("bottle", { bottle = payload });
+        sendPacket(k, { bottle = payload });
     end
 end
 
@@ -564,15 +564,6 @@ function updateFlags()
     dumpSkulltulaStorage();
 end
 
-function hex2rgb(hex)
-    hex = hex:gsub("#", "")
-    if (string.len(hex) == 3) then
-        return tonumber("0x" .. hex:sub(1, 1)) * 17, tonumber("0x" .. hex:sub(2, 2)) * 17, tonumber("0x" .. hex:sub(3, 3)) * 17
-    elseif (string.len(hex) == 6) then
-        return { r = tonumber("0x" .. hex:sub(1, 2)), g = tonumber("0x" .. hex:sub(3, 4)), b = tonumber("0x" .. hex:sub(5, 6)) }
-    end
-end
-
 link_last_state = 0x0;
 
 function checkForLinkState()
@@ -612,22 +603,6 @@ function checkForSceneChange()
     return false;
 end
 
-navi_colors = {
-    ok = hex2rgb("#11b22b"),
-    partial = hex2rgb("#b2ac11"),
-    error = hex2rgb("#b21111")
-};
-
-local current_navi_index = "error";
-
-function generateNaviColor()
-    if (checkForTitleScreen() == false) then
-        writeByte(0x0E8224, navi_colors[current_navi_index].r);
-        writeByte(0x0E8225, navi_colors[current_navi_index].g);
-        writeByte(0x0E8226, navi_colors[current_navi_index].b);
-    end
-end
-
 sendMessage("OoT Randomizer Co-op v" .. VERSION);
 local connected = connectToNode();
 
@@ -649,10 +624,7 @@ function processPacketBuffer()
             local packet = json.decode(from_base64(s));
             sendMessage(packet.message);
             if (packet.message == "Connected to node!") then
-                current_navi_index = "partial";
                 sendPacket("seed", { seed = seed });
-            elseif (string.match(packet.message, "Connected to partner")) then
-                current_navi_index = "ok";
             end
             if (packet.payload ~= nil) then
                 for k, v in pairs(packet.payload) do
@@ -734,6 +706,8 @@ function isSceneDungeon(index)
     return nil;
 end
 
+local already_seen_menu = false;
+
 while true do
     already_synced = false;
     if (displayMessageTimer < displayMessageTimerMax) then
@@ -755,8 +729,23 @@ while true do
                 updateScenes();
                 updateFlags();
             end
-            generateNaviColor();
         end
+        if (checkForMenu()) then
+            if (already_seen_menu ~= true) then
+                if (joypad.get()["P1 DPad U"] == true) then
+                    -- Need the random to sneak past the packet cache.
+                    sendPacket("resync_me", {resync_me= true, random=math.random(255)});
+                    already_seen_menu = true;
+                end
+            end
+        else
+            if (checkForOverworld()) then
+                if (already_seen_menu) then
+                    already_seen_menu = false;
+                end
+            end
+        end
+
     end
     doPacketCheck();
     emu.frameadvance();
