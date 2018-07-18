@@ -21,21 +21,19 @@ function encodeDataForClient(data) {
 const websocket = new IO_Client("http://" + master_server_ip + ":" + master_server_port);
 
 websocket.on('connect', function () {
-    websocket.emit('room_request', encodeDataForClient({room: GAME_ROOM}));
-});
-
-websocket.on('room', function (data) {
-    let parse = decodeDataFromClient(data);
-    GAME_ROOM = parse.room;
-    console.log("Client: Master Server assigned me to room: " + GAME_ROOM + ".");
-    websocket.emit('room', encodeDataForClient({room: GAME_ROOM, nickname: nickname}));
+    websocket.emit('room', encodeDataForClient({room: GAME_ROOM, password: ""}));
 });
 
 websocket.on('room_verified', function (data) {
     let parse = decodeDataFromClient(data);
     if (parse.verified) {
         console.log("Client: Successfully joined room: " + GAME_ROOM + ".");
-        websocket.emit('room_check', GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname}));
+        websocket.emit('room_check', GAME_ROOM, encodeDataForClient({
+            uuid: my_uuid,
+            nickname: nickname
+        }));
+    } else {
+        console.log("Request for room " + parse.room + " was denied due to an invalid password.");
     }
 });
 

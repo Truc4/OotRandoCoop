@@ -491,19 +491,51 @@ function dumpSkulltulaStorage()
     sendPacket("skulltulas", { skulltulas = sdata });
 end
 
-function dumpDungeonData()
-    local d_data = {};
-    for k, v in pairs(dungeon_stuff) do
-        local addr = tonumber(v);
-        local memdump = readByte(addr);
-        d_data[v] = memdump;
+function isSceneDungeon()
+    for k, v in pairs(dungeon_scenes) do
+        if (v == current_data.scene) then
+            -- dungeon detected.
+            return k;
+        end
     end
-    sendPacket("dungeon", { dungeon = d_data })
+    return nil;
+end
+
+local isKeysanity = false;
+
+function dumpDungeonData()
+    if (isKeysanity) then
+        -- Assume nothing for Keysanity...
+        if (isSceneDungeon() ~= nil) then
+            for k, v in pairs(dungeon_stuff) do
+                local memdump = readByte(v);
+                local data = toBits(memdump, 8);
+                local addr = DEC_HEX(v);
+                sendPacket("dungeon_items", { addr = addr, dungeon_items = data });
+            end
+        end
+    else
+        local d = isSceneDungeon();
+        if (d) then
+            local memdump = readByte(dungeon_stuff[d]);
+            local data = toBits(memdump, 8);
+            local addr = DEC_HEX(dungeon_stuff[d]);
+            sendPacket("dungeon_items", { addr = addr, dungeon_items = data });
+        end
+    end
 end
 
 function dumpDungeonKeys(index)
-    local memdump = readByte(tonumber(small_keys[index]));
-    sendPacket("small_keys", { dungeon_key = index, dungeon_key_payload = memdump });
+    local addr = small_keys[index];
+    local memdump = readByte(addr);
+    sendPacket("small_keys", { dungeon_key = index, addr = DEC_HEX(addr), dungeon_key_payload = memdump, random = math.random() });
+end
+
+function writeDungeonDelta(packet)
+    local addr = tonumber(packet.addr);
+    local current = readByte(addr);
+    current = current + packet.dungeon_key_delta;
+    writeByte(addr, current);
 end
 
 function writeSkulltulas(packet)
@@ -551,6 +583,17 @@ function sendUpdate()
     updateDataFromRAM();
     sendPacket("current_data", current_data);
     updateBottles();
+    dumpDungeonData();
+    local scene = isSceneDungeon();
+    if (isKeysanity and scene ~= nil) then
+        for k, v in pairs(dungeon_scenes) do
+            dumpDungeonKeys(k);
+        end
+    else
+        if (scene ~= nil) then
+            dumpDungeonKeys(scene);
+        end
+    end
 end
 
 function updateScenes()
@@ -617,6 +660,8 @@ function buildPacketBuffer()
     end
 end
 
+local ganonWarpEnabled = false;
+
 function processPacketBuffer()
     if (next(packet_buffer) ~= nil) then
         local s = table.remove(packet_buffer, 1);
@@ -638,22 +683,22 @@ function processPacketBuffer()
                 sendUpdate();
                 updateScenes();
                 updateFlags();
-            end
-            if (packet.scene_data ~= nil) then
+            elseif (packet.scene_data ~= nil) then
                 current_data.scene_update = false;
                 writeScene(packet);
-            end
-            if (packet.flag_data ~= nil) then
+            elseif (packet.flag_data ~= nil) then
                 current_data.flag_update = false;
                 writeFlags(packet);
-            end
-            if (packet.skulltulas ~= nil) then
+            elseif (packet.skulltulas ~= nil) then
                 writeSkulltulas(packet);
-            end
-            if (packet.scarecrow ~= nil) then
+            elseif (packet.scarecrow ~= nil) then
                 dumpScarecrow();
             elseif (packet.pierre ~= nil) then
                 writeScarecrow(packet);
+            elseif (packet.ganon ~= nil) then
+                ganonWarpEnabled = true;
+            elseif (packet.dungeon_key_delta ~= nil) then
+                writeDungeonDelta(packet);
             end
         end) then
         else
@@ -696,17 +741,47 @@ function isPacketBufferEmpty()
     return next(packet_buffer) == nil;
 end
 
-function isSceneDungeon(index)
-    for k, v in pairs(dungeon_scenes) do
-        if (v == index) then
-            -- dungeon detected.
-            return k;
+local ganon_ent = {};
+ganon_ent["0x11A5D0"] = 0;
+ganon_ent["0x11A5D1"] = 0;
+ganon_ent["0x11A5D2"] = 4;
+ganon_ent["0x11A5D3"] = 31;
+local ganon_scene = 25;
+
+local do_on_each_frame = {};
+
+function registerFrameHook(fn, maxframes)
+    table.insert(do_on_each_frame, { fn = fn, maxframes = maxframes, framecount = 0 });
+end
+
+function runFrameHooks()
+    if (next(do_on_each_frame) ~= nil) then
+        local v = do_on_each_frame[1];
+        v["fn"]();
+        v["framecount"] = v["framecount"] + 1;
+        if (v["framecount"] > v["maxframes"]) then
+            table.remove(do_on_each_frame, 1);
         end
     end
-    return nil;
+end
+
+function sendToGanon()
+    -- sending to ganon.
+    registerFrameHook(function()
+        writeByte(link_instance + link_flags_offset, 0x80);
+    end, 30);
+    registerFrameHook(function()
+        if (getCurrentScene() ~= 25) then
+            for k, v in pairs(ganon_ent) do
+                writeByte(tonumber(k), v);
+            end
+            writeByte(0x11A5D7, 0x0);
+        end
+    end, 200);
 end
 
 local already_seen_menu = false;
+local wasSentToGanon = false;
 
 while true do
     already_synced = false;
@@ -734,7 +809,7 @@ while true do
             if (already_seen_menu ~= true) then
                 if (joypad.get()["P1 DPad U"] == true) then
                     -- Need the random to sneak past the packet cache.
-                    sendPacket("resync_me", {resync_me= true, random=math.random(255)});
+                    sendPacket("resync_me", { resync_me = true, random = math.random() });
                     already_seen_menu = true;
                 end
             end
@@ -742,11 +817,18 @@ while true do
             if (checkForOverworld()) then
                 if (already_seen_menu) then
                     already_seen_menu = false;
+                    wasSentToGanon = false;
                 end
             end
         end
-
+    end
+    if (joypad.get()["P1 DPad L"] == true and wasSentToGanon == false) then
+        if (ganonWarpEnabled) then
+            wasSentToGanon = true;
+            sendToGanon();
+        end
     end
     doPacketCheck();
+    runFrameHooks();
     emu.frameadvance();
 end

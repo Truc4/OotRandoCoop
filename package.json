@@ -9,6 +9,7 @@
   "dependencies": {
     "concat-files": "^0.1.1",
     "human-readable-ids": "^1.0.4",
+    "libui-node": "^0.2.1",
     "nat-upnp": "^1.1.1",
     "node-ini": "^1.0.0",
     "node-lzw": "^0.3.1",

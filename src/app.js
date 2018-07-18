@@ -20,28 +20,578 @@ const restify = require('restify');
 const fs = require("fs");
 const net = require('net');
 const serveStatic = require('serve-static-restify');
-const ini = require('node-ini');
 const lzw = require("node-lzw");
 const natUpnp = require('nat-upnp');
 const IO_Server = require('socket.io');
 const IO_Client = require('socket.io-client');
 const hri = require('human-readable-ids').hri;
+const libui = require('libui-node');
+const crypto = require('crypto');
+
+class GUI {
+    constructor() {
+        this._controls = {};
+        this._window = libui.UiWindow("Oot Rando Co-op Node", 400, 300, true);
+        this._window.margined = 1;
+        this._form = new libui.UiForm();
+        this._form.padded = true;
+        this._hBox = new libui.UiVerticalBox();
+        this._hBox.padded = true;
+        this._hBox.append(this._form, 1);
+        this._window.setChild(this._hBox);
+
+        this._window.onClosing(() => {
+            this._window.close();
+            libui.stopLoop();
+            process.exit();
+        });
+
+        (function (inst) {
+            GUI.createTextBox(inst, inst.form, "Nickname", CONFIG.nickname, function () {
+                CONFIG.nickname = inst.controls["Nickname"].text;
+                CONFIG.save();
+            });
+            GUI.createTextBox(inst, inst.form, "Server", CONFIG.master_server_ip, function () {
+                CONFIG.master_server_ip = inst.controls["Server"].text;
+                CONFIG.save();
+            });
+            GUI.createTextBox(inst, inst.form, "Port", CONFIG.master_server_port, function () {
+                CONFIG.master_server_port = inst.controls["Port"].text;
+                CONFIG.save();
+            });
+            GUI.createTextBox(inst, inst.form, "Room", CONFIG.GAME_ROOM, function () {
+                CONFIG.GAME_ROOM = inst.controls["Room"].text;
+                CONFIG.save();
+            });
+            GUI.createPasswordBox(inst, inst.form, "Password", CONFIG.game_password, function () {
+                CONFIG.game_password = inst.controls["Password"].text;
+                CONFIG.save();
+            });
+            GUI.createCheckBox(inst, inst.form, "Run Master Server?", CONFIG.isMaster, function () {
+                CONFIG.isMaster = inst.controls["Run Master Server?"].getChecked();
+                CONFIG.save();
+            });
+            GUI.createCheckBox(inst, inst.form, "Run Client?", CONFIG.isClient, function () {
+                CONFIG.isClient = inst.controls["Run Client?"].getChecked();
+                CONFIG.save();
+            });
+            GUI.createCheckBox(inst, inst.form, "Run Tracker?", CONFIG.isTracker, function () {
+                CONFIG.isTracker = inst.controls["Run Tracker?"].getChecked();
+                CONFIG.save();
+            });
+            GUI.createButton(inst, inst.hBox, "Connect", "Connect", function () {
+                if (CONFIG.isMaster) {
+                    if (master === null) {
+                        master = new MasterServer();
+                        master.setup();
+                    }
+                }
+                if (CONFIG.isClient) {
+                    client = new Client();
+                    client.setup();
+                }
+            });
+        })(this);
+        this._window.show();
+        libui.startLoop();
+    }
+
+    get controls() {
+        return this._controls;
+    }
+
+    set controls(value) {
+        this._controls = value;
+    }
+
+    get form() {
+        return this._form;
+    }
+
+    set form(value) {
+        this._form = value;
+    }
+
+    get hBox() {
+        return this._hBox;
+    }
+
+    set hBox(value) {
+        this._hBox = value;
+    }
+
+    get name() {
+        return this._name;
+    }
+
+    set name(value) {
+        this._name = value;
+    }
+
+    get window() {
+        return this._window;
+    }
+
+    set window(value) {
+        this._window = value;
+    }
+
+    static createTextBox(inst, parent, name, value, callback = function () {
+    }) {
+        inst.controls[name] = new libui.UiEntry();
+        inst.controls[name].text = value;
+        inst.controls[name].onChanged(callback);
+        parent.append(name, inst.controls[name], 0);
+    }
+
+    static createPasswordBox(inst, parent, name, value, callback = function () {
+    }) {
+        inst.controls[name] = new libui.UiPasswordEntry();
+        inst.controls[name].text = value;
+        inst.controls[name].onChanged(callback);
+        parent.append(name, inst.controls[name], 0);
+    }
+
+    static createButton(inst, parent, name, value, callback = function () {
+    }) {
+        inst.controls[name] = new libui.UiButton();
+        inst.controls[name].text = value;
+        inst.controls[name].onClicked(callback);
+        parent.append(inst.controls[name], 0);
+    }
+
+    static createCheckBox(inst, parent, name, value, callback = function () {
+    }) {
+        inst.controls[name] = new libui.UiCheckbox();
+        inst.controls[name].text = name;
+        inst.controls[name].setChecked(value);
+        inst.controls[name].onToggled(callback);
+        parent.append("", inst.controls[name], 0);
+    }
+}
 
 // Config
 
-// This ID is now assigned by the master server.
-let my_uuid = "";
-let cfg = ini.parseSync('./OotRandoCoop-config.ini');
-let master_server_ip = cfg.Server.master_server_ip;
-let master_server_port = cfg.Server.master_server_port;
-console.log("Master Server IP: " + master_server_ip + ":" + master_server_port);
-let isMaster = cfg.Server.master_server === "true";
-let isTracker = cfg.Tracker.enabled === "true";
-let isClient = cfg.Client.enable_client === "true";
-let nickname = cfg.Client.nickname;
-let GAME_ROOM = cfg.Client.game_room;
+class Configuration {
 
-let websocket = null;
+    constructor() {
+        this._my_uuid = "";
+        this.file = "./Oot-Rando-Coop-config.json";
+        this.cfg = {};
+        if (fs.existsSync(this.file)) {
+            this.cfg = JSON.parse(fs.readFileSync(this.file));
+        } else {
+            this.cfg["SERVER"] = {};
+            this.cfg.SERVER["master_server_ip"] = "192.99.70.23";
+            this.cfg.SERVER["master_server_port"] = "8081";
+            this.cfg.SERVER["isMaster"] = false;
+            this.cfg["CLIENT"] = {};
+            this.cfg.CLIENT["isTracker"] = true;
+            this.cfg.CLIENT["isClient"] = true;
+            this.cfg.CLIENT["nickname"] = "Player";
+            this.cfg.CLIENT["game_room"] = hri.random();
+            this.cfg.CLIENT["game_password"] = "";
+            this.cfg.GUI = {};
+            this.cfg.GUI["show_gui"] = true;
+            fs.writeFileSync(this.file, JSON.stringify(this.cfg, null, 2));
+        }
+        this._master_server_ip = this.cfg.SERVER.master_server_ip;
+        this._master_server_port = this.cfg.SERVER.master_server_port;
+        this._isMaster = this.cfg.SERVER.isMaster;
+        this._isTracker = this.cfg.CLIENT.isTracker;
+        this._isClient = this.cfg.CLIENT.isClient;
+        this._nickname = this.cfg.CLIENT.nickname;
+        this._GAME_ROOM = this.cfg.CLIENT.game_room;
+        this._game_password = this.cfg.CLIENT.game_password;
+        this._show_gui = this.cfg.GUI.show_gui;
+    }
+
+    get game_password() {
+        return this._game_password;
+    }
+
+    set game_password(value) {
+        this._game_password = value;
+    }
+
+    get show_gui() {
+        return this._show_gui;
+    }
+
+    set show_gui(value) {
+        this._show_gui = value;
+    }
+
+    get my_uuid() {
+        return this._my_uuid;
+    }
+
+    set my_uuid(value) {
+        this._my_uuid = value;
+    }
+
+    get master_server_ip() {
+        return this._master_server_ip;
+    }
+
+    set master_server_ip(value) {
+        this._master_server_ip = value;
+    }
+
+    get master_server_port() {
+        return this._master_server_port;
+    }
+
+    set master_server_port(value) {
+        this._master_server_port = value;
+    }
+
+    get isMaster() {
+        return this._isMaster;
+    }
+
+    set isMaster(value) {
+        this._isMaster = value;
+    }
+
+    get isTracker() {
+        return this._isTracker;
+    }
+
+    set isTracker(value) {
+        this._isTracker = value;
+    }
+
+    get isClient() {
+        return this._isClient;
+    }
+
+    set isClient(value) {
+        this._isClient = value;
+    }
+
+    get nickname() {
+        return this._nickname;
+    }
+
+    set nickname(value) {
+        this._nickname = value;
+    }
+
+    get GAME_ROOM() {
+        return this._GAME_ROOM;
+    }
+
+    set GAME_ROOM(value) {
+        this._GAME_ROOM = value;
+    }
+
+    getPasswordHash() {
+        return crypto.createHash('md5').update(this.game_password).digest("hex");
+    }
+
+    save() {
+        this.cfg.SERVER["master_server_ip"] = this._master_server_ip;
+        this.cfg.SERVER["master_server_port"] = this._master_server_port;
+        this.cfg.SERVER["isMaster"] = this._isMaster;
+        this.cfg.CLIENT["isTracker"] = this._isTracker;
+        this.cfg.CLIENT["isClient"] = this._isClient;
+        this.cfg.CLIENT["nickname"] = this._nickname;
+        this.cfg.CLIENT["game_room"] = this._GAME_ROOM;
+        this.cfg.CLIENT["game_password"] = this._game_password;
+        fs.writeFileSync(this.file, JSON.stringify(this.cfg, null, 2));
+    }
+}
+
+class MasterServer {
+    constructor() {
+        this._upnp_client = natUpnp.createClient();
+        this._upnp_client.portMapping({
+            public: CONFIG.master_server_port,
+            private: CONFIG.master_server_port,
+            ttl: 10
+        }, function (err) {
+            if (err) {
+                console.log("Master: Please open port " + CONFIG.master_server_port + " on your router in order to host a game.")
+            } else {
+                console.log("Master: Port opened successfully!")
+            }
+        });
+
+        console.log("Setting up master server...");
+        CONFIG.master_server_ip = "127.0.0.1";
+
+        this._ws_server = new IO_Server(CONFIG.master_server_port);
+        this._ws_server["OotRooms"] = {};
+    }
+
+    get upnp_client() {
+        return this._upnp_client;
+    }
+
+    set upnp_client(value) {
+        this._upnp_client = value;
+    }
+
+    get ws_server() {
+        return this._ws_server;
+    }
+
+    set ws_server(value) {
+        this._ws_server = value;
+    }
+
+    setup() {
+        (function (ws_server) {
+            ws_server.on('connection', function (socket) {
+                socket.emit('id', encodeDataForClient({id: socket.id}));
+                socket.on('room_request', function (data) {
+
+                });
+                socket.on('room', function (data) {
+                    let parse = decodeDataFromClient(data);
+                    if (parse.room === "" || parse.room === null) {
+                        parse.room = hri.random();
+                    }
+                    if (!ws_server.sockets.adapter.rooms.hasOwnProperty(parse.room)) {
+                        console.log("Master: User claiming room " + parse.room + ".");
+                        socket.join(parse.room);
+                        ws_server.sockets.adapter.rooms[parse.room]["password"] = parse.password;
+                        socket.emit('room_verified', encodeDataForClient({verified: true}));
+                        socket.to(parse.room).emit('client_joined', encodeDataForClient({nickname: parse.nickname}));
+                    } else {
+                        if (ws_server.sockets.adapter.rooms[parse.room].password === parse.password) {
+                            socket.join(parse.room);
+                            console.log("Master: Connecting client to room: " + parse.room + ".");
+                            socket.emit('room_verified', encodeDataForClient({verified: true}));
+                            socket.to(parse.room).emit('client_joined', encodeDataForClient({nickname: parse.nickname}));
+                        } else {
+                            socket.emit('room_verified', encodeDataForClient({verified: false}));
+                        }
+                    }
+                });
+                socket.on('room_check', function (room, data) {
+                    socket.to(room).emit('room_check', data);
+                });
+                socket.on('room_check_resp', function (room, data) {
+                    let parse = decodeDataFromClient(data);
+                    socket.to(parse.toClient).emit('room_check_resp', data);
+                });
+                socket.on('initial_sync', function (room, data) {
+                    socket.to(room).emit('initial_sync', data);
+                });
+                socket.on('msg', function (room, data) {
+                    socket.to(room).emit('msg', data);
+                });
+            });
+        })(this._ws_server);
+    }
+}
+
+class Client {
+    constructor() {
+        console.log("Setting up client...");
+        console.log("Master Server IP: " + CONFIG.master_server_ip + ":" + CONFIG.master_server_port);
+        this._websocket = new IO_Client("http://" + CONFIG.master_server_ip + ":" + CONFIG.master_server_port);
+    }
+
+    get websocket() {
+        return this._websocket;
+    }
+
+    set websocket(value) {
+        this._websocket = value;
+    }
+
+    setup() {
+        (function (websocket, inst) {
+            websocket.on('connect', function () {
+                websocket.emit('room', encodeDataForClient({
+                    room: CONFIG.GAME_ROOM,
+                    password: CONFIG.getPasswordHash()
+                }));
+            });
+
+            websocket.on('room_verified', function (data) {
+                let parse = decodeDataFromClient(data);
+                if (parse.verified) {
+                    console.log("Client: Successfully joined room: " + CONFIG.GAME_ROOM + ".");
+                    sendJustText("Connected to master server!");
+                    websocket.emit('room_check', CONFIG.GAME_ROOM, encodeDataForClient({
+                        uuid: CONFIG.my_uuid,
+                        nickname: CONFIG.nickname
+                    }));
+                } else {
+                    console.log("Request for room " + parse.room + " was denied due to an invalid password.");
+                }
+            });
+
+            websocket.on('id', function (data) {
+                let parse = decodeDataFromClient(data);
+                CONFIG.my_uuid = parse.id;
+                console.log("Client: My UUID: " + CONFIG.my_uuid);
+            });
+
+            websocket.on('client_joined', function (data) {
+                let parse = decodeDataFromClient(data);
+                sendJustText(parse.nickname + " has joined the game!");
+            });
+
+            websocket.on('room_check', function (data) {
+                let parse = decodeDataFromClient(data);
+                websocket.emit('room_check_resp', CONFIG.GAME_ROOM, encodeDataForClient({
+                    uuid: CONFIG.my_uuid,
+                    nickname: CONFIG.nickname,
+                    toClient: parse.uuid
+                }));
+            });
+
+            websocket.on('room_check_resp', function (data) {
+                let parse = decodeDataFromClient(data);
+                sendJustText("Connected player: " + parse.nickname + ".");
+            });
+
+            websocket.on('initial_sync', function (data) {
+                send({message: "Sending initial data to partners...", player_connecting: true});
+                if (hasPierre && data.pierre) {
+                    sendJustText("Sending Pierre to new player.");
+                    sendJustText("Incoming lag spike.");
+                    setTimeout(function () {
+                        send({message: "Querying for Pierre data...", scarecrow: true});
+                    }, 30000);
+                }
+            });
+
+            websocket.on('msg', function (data) {
+                let parse = decodeDataFromClient(data);
+                let incoming = parse.payload;
+                processData(incoming, parse.uuid);
+            });
+        })(this._websocket, this);
+    }
+}
+
+class EmuConnection {
+    constructor() {
+        this._emuhawk = null;
+        this._packet_buffer = "";
+        this._awaiting_send = [];
+        this._zServer = net.createServer(function (socket) {
+            console.log("Connected to BizHawk!");
+            this._emuhawk = socket;
+            sendJustText("Connected to node!");
+            socket.setEncoding('ascii');
+            socket.on('data', function (data) {
+                try {
+                    let dataStream = data.split("\r\n");
+                    for (let i = 0; i < dataStream.length; i++) {
+                        if (dataStream[i] === "") {
+                            continue;
+                        }
+                        // This shit literally only triggers on Pierre's data because its comically huge by Oot standards.
+                        if (dataStream[i].indexOf("}") === -1) {
+                            // Incomplete data.
+                            this._packet_buffer = dataStream[i];
+                            continue;
+                        } else if (dataStream[i].indexOf("{") === -1) {
+                            // This must be the other half.
+                            this._packet_buffer += dataStream[i];
+                        } else if (dataStream[i].indexOf("{") > -1 && dataStream[i].indexOf("}") > -1) {
+                            this._packet_buffer = dataStream[i];
+                        } else {
+                            this._packet_buffer += dataStream[i];
+                            continue;
+                        }
+                        parseData(this._packet_buffer);
+                    }
+                } catch (err) {
+                    if (err) {
+                        console.log(err);
+                        console.log("---------------------");
+                        console.log("Something went wrong!");
+                        console.log("---------------------");
+                        console.log(packet_buffer);
+                        this._packet_buffer = "";
+                    }
+                }
+            });
+        });
+        if (CONFIG.isClient) {
+            this._server = restify.createServer();
+            this._server.name = "Oot Randomizer Co-op";
+            this._server.use(restify.plugins.bodyParser());
+            (function (server) {
+                server.listen(process.env.port || process.env.PORT || 8082, function () {
+                    console.log('%s listening to %s', server.name, server.url);
+                });
+            })(this._server);
+            if (CONFIG.isTracker) {
+                console.log("Setting up item tracker...");
+                (function (server) {
+                    if (fs.existsSync("./overlay/overlay.html")) {
+                        server.pre(serveStatic('./overlay', {'index': ['overlay.html']}));
+                    }
+                    server.get('/oot/randomizer/data', function (req, res, next) {
+                        res.send(OotOverlay_data);
+                        next();
+                    });
+                })(this._server);
+            }
+            (function (server, awaiting_send, zServer) {
+                server.get('/oot/randomizer/awaiting', function (req, res, next) {
+                    res.send(awaiting_send);
+                    awaiting_send.length = 0;
+                    next();
+                });
+                zServer.listen(1337, '127.0.0.1', function () {
+                    console.log("Awaiting connection. Please load the .lua script in Bizhawk.");
+                });
+            })(this._server, this._awaiting_send, this._zServer);
+        }
+    }
+
+    get emuhawk() {
+        return this._emuhawk;
+    }
+
+    set emuhawk(value) {
+        this._emuhawk = value;
+    }
+
+    get packet_buffer() {
+        return this._packet_buffer;
+    }
+
+    set packet_buffer(value) {
+        this._packet_buffer = value;
+    }
+
+    get awaiting_send() {
+        return this._awaiting_send;
+    }
+
+    set awaiting_send(value) {
+        this._awaiting_send = value;
+    }
+
+    get zServer() {
+        return this._zServer;
+    }
+
+    set zServer(value) {
+        this._zServer = value;
+    }
+
+    get server() {
+        return this._server;
+    }
+
+    set server(value) {
+        this._server = value;
+    }
+}
+
+const CONFIG = new Configuration();
 
 function decodeDataFromClient(pack) {
     return JSON.parse(lzw.decode(pack));
@@ -51,129 +601,40 @@ function encodeDataForClient(data) {
     return lzw.encode(JSON.stringify(data));
 }
 
-if (isMaster) {
-    console.log("Setting up master server...");
-    master_server_ip = "127.0.0.1";
+let master = null;
+let client = null;
+let emu = null;
 
-    let client = natUpnp.createClient();
-    client.portMapping({
-        public: master_server_port,
-        private: master_server_port,
-        ttl: 10
-    }, function (err) {
-        if (err) {
-            console.log("Please open port " + master_server_port + " on your router in order to host a game.")
-        } else {
-            console.log("Port opened successfully!")
-        }
-    });
+if (CONFIG.show_gui) {
+    const gui = new GUI();
+} else {
+    if (CONFIG.isMaster) {
+        master = new MasterServer();
+        master.setup();
+    }
 
-    let ws_server = new IO_Server(master_server_port);
-
-    ws_server.on('connection', function (socket) {
-        socket.emit('id', encodeDataForClient({id: socket.id}));
-        socket.on('room_request', function (data) {
-            let parse = decodeDataFromClient(data);
-            if (parse.room === "" || parse.room === null) {
-                parse.room = hri.random();
-            }
-            socket.emit('room', encodeDataForClient({room: parse.room}));
-        });
-        socket.on('room', function (data) {
-            let parse = decodeDataFromClient(data);
-            socket.join(parse.room);
-            console.log("Master: Connecting client to room " + parse.room + ".");
-            socket.to(parse.room).emit('client_joined', encodeDataForClient({nickname: parse.nickname}));
-            socket.emit('room_verified', encodeDataForClient({verified: true}));
-        });
-        socket.on('room_check', function (room, data) {
-            socket.to(room).emit('room_check', data);
-        });
-        socket.on('room_check_resp', function (room, data) {
-            let parse = decodeDataFromClient(data);
-            socket.to(parse.toClient).emit('room_check_resp', data);
-        });
-        socket.on('initial_sync', function (room, data) {
-            socket.to(room).emit('initial_sync', data);
-        });
-        socket.on('msg', function (room, data) {
-            socket.to(room).emit('msg', data);
-        });
-    });
+    if (CONFIG.isClient) {
+        client = new Client();
+        client.setup();
+    }
 }
 
-function setupClient() {
-    console.log("Setting up client...");
-    websocket = new IO_Client("http://" + master_server_ip + ":" + master_server_port);
-
-    websocket.on('connect', function () {
-        websocket.emit('room_request', encodeDataForClient({room: GAME_ROOM}));
-    });
-
-    websocket.on('room', function (data) {
-        let parse = decodeDataFromClient(data);
-        GAME_ROOM = parse.room;
-        console.log("Client: Master Server assigned me to room: " + GAME_ROOM + ".");
-        websocket.emit('room', encodeDataForClient({room: GAME_ROOM, nickname: nickname}));
-    });
-
-    websocket.on('room_verified', function (data) {
-        let parse = decodeDataFromClient(data);
-        if (parse.verified) {
-            console.log("Client: Successfully joined room: " + GAME_ROOM + ".");
-            websocket.emit('room_check', GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname}));
-        }
-    });
-
-    websocket.on('id', function (data) {
-        let parse = decodeDataFromClient(data);
-        my_uuid = parse.id;
-        console.log("Client: My UUID: " + my_uuid);
-    });
-
-    websocket.on('client_joined', function (data) {
-        let parse = decodeDataFromClient(data);
-        sendJustText(parse.nickname + " has joined the game!");
-    });
-
-    websocket.on('room_check', function (data) {
-        let parse = decodeDataFromClient(data);
-        websocket.emit('room_check_resp', GAME_ROOM, encodeDataForClient({
-            uuid: my_uuid,
-            nickname: nickname,
-            toClient: parse.uuid
-        }));
-    });
-
-    websocket.on('room_check_resp', function (data) {
-        let parse = decodeDataFromClient(data);
-        sendJustText("Connected player: " + parse.nickname + ".");
-    });
-
-    websocket.on('initial_sync', function (data) {
-        send({message: "Sending initial data to partners...", player_connecting: true});
-        if (hasPierre) {
-            sendJustText("Sending Pierre to new player.");
-            sendJustText("Incoming lag spike.");
-            setTimeout(function () {
-                send({message: "Querying for Pierre data...", scarecrow: true});
-            }, 30000);
-        }
-    });
-
-    websocket.on('msg', function (data) {
-        let parse = decodeDataFromClient(data);
-        let incoming = parse.payload;
-        processData(incoming, parse.uuid);
-    });
-}
+emu = new EmuConnection();
 
 function sendDataToMaster(data) {
-    websocket.emit('msg', GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname, payload: data}));
+    client.websocket.emit('msg', CONFIG.GAME_ROOM, encodeDataForClient({
+        uuid: CONFIG.my_uuid,
+        nickname: CONFIG.nickname,
+        payload: data
+    }));
 }
 
 function sendDataToMasterOnChannel(channel, data) {
-    websocket.emit(channel, GAME_ROOM, encodeDataForClient({uuid: my_uuid, nickname: nickname, payload: data}));
+    client.websocket.emit(channel, CONFIG.GAME_ROOM, encodeDataForClient({
+        uuid: CONFIG.my_uuid,
+        nickname: CONFIG.nickname,
+        payload: data
+    }));
 }
 
 // Basic server for talking to Bizhawk.
@@ -182,9 +643,17 @@ let initial_setup_complete = false;
 
 function processData(incoming, uuid) {
     let doesUpdate = true;
-    if (incoming.hasOwnProperty("resync_me")){
-        sendJustText("Sending resync request...");
-        sendDataToMasterOnChannel('initial_sync', {player_connecting: true});
+    if (incoming.hasOwnProperty("resync_me")) {
+        sendJustText("Sending resync request. Please wait...");
+        OotStorage = loadBaseData();
+        OotOverlay_data = {};
+        SceneStorage = {};
+        FlagStorage = {};
+        SkulltulaStorage = {};
+        send({message: "Reloading gamestate...", player_connecting: true});
+        setTimeout(function () {
+            sendDataToMasterOnChannel('initial_sync', {player_connecting: true, pierre: !hasPierre});
+        }, 5000);
         return;
     }
     if (incoming.hasOwnProperty("scene_data")) {
@@ -212,9 +681,17 @@ function processData(incoming, uuid) {
         Object.keys(incoming.skulltulas).forEach(function (key) {
             updateSkulltulas({addr: key, data: incoming.skulltulas[key], uuid: uuid})
         });
-    } else if (incoming.hasOwnProperty("dungeon")) {
-        // NYI
-    } else if (incoming.hasOwnProperty("scarecrow_data")) {
+    } else if (incoming.hasOwnProperty("dungeon_items")) {
+        updateDungeonItems({addr: incoming.addr, data: incoming.dungeon_items, uuid: uuid});
+    } else if (incoming.hasOwnProperty("dungeon_key")) {
+        // Don't send this to the server directly. We'll send a delta from the handler itself.
+        updateDungeonKeyTrackers(incoming);
+        doesUpdate = false;
+    } else if (incoming.hasOwnProperty("dungeon_key_delta")) {
+        processDungeonKeyDelta(incoming);
+        doesUpdate = false;
+    }
+    else if (incoming.hasOwnProperty("scarecrow_data")) {
         updateScarecrow({uuid: uuid, payload: incoming});
     } else if (incoming.hasOwnProperty("bottle")) {
         if (initial_setup_complete) {
@@ -223,15 +700,15 @@ function processData(incoming, uuid) {
             doesUpdate = false;
         }
     } else {
-        if (OotStorage == null && !initial_setup_complete && uuid === my_uuid) {
+        if (OotStorage == null && !initial_setup_complete && uuid === CONFIG.my_uuid) {
             sendJustText("Loading initial game state...");
-            OotStorage = incoming;
+            OotStorage = loadBaseData();
             updateBundles({uuid: uuid, data: incoming});
             updateInventory({uuid: uuid, data: incoming});
             overlayHandler(incoming);
             setTimeout(function () {
                 sendJustText("Sending sync request...");
-                sendDataToMasterOnChannel('initial_sync', {player_connecting: true});
+                sendDataToMasterOnChannel('initial_sync', {player_connecting: true, pierre: false});
                 initial_setup_complete = true;
             }, 10000);
             doesUpdate = false;
@@ -240,11 +717,16 @@ function processData(incoming, uuid) {
             if (initial_setup_complete) {
                 updateInventory({uuid: uuid, data: incoming});
                 updateBundles({uuid: uuid, data: incoming});
+                checkForGanon(incoming);
                 overlayHandler(incoming);
             }
         }
     }
     return doesUpdate;
+}
+
+function loadBaseData() {
+    return JSON.parse(Buffer.from("eyJjdHJhZGUiOjI1NSwiYXRyYWRlIjoyNTUsIm1hZ2ljX2xpbWl0IjowLCJsZW5zIjoyNTUsIm9jYXJpbmEiOjI1NSwic3RpY2siOjI1NSwiZndpbmQiOjI1NSwiYm9tYl9jb3VudCI6MCwibnV0c19jb3VudCI6MCwicXVlc3RfMyI6WzAsMCwwLDAsMCwwLDAsMF0sImlhcnJvdyI6MjU1LCJtYWdpY19ib29sIjowLCJza3VsbF90b2tlbnNfY291bnQiOjAsImhhbW1lciI6MjU1LCJoZWFsIjowLCJudXRzIjoyNTUsImxhcnJvdyI6MjU1LCJhcnJvd3NfY291bnQiOjAsImJvb21lcmFuZyI6MjU1LCJib21iY2h1X2NvdW50IjowLCJkZWZlbnNlIjowLCJoZWFydHMiOjQ4LCJ1cGdyYWRlc18yIjpbMCwwLDAsMCwwLDAsMCwwXSwiYmVhbl9jb3VudCI6MCwidHVuaWNzIjpbMCwwLDAsMSwwLDAsMCwxXSwibmxvdmUiOjI1NSwibWFnaWNfcG9vbCI6MCwiYm93IjoyNTUsInN0aWNrX2NvdW50IjowLCJidWxsZXRfY291bnQiOjAsImJvbWJzIjoyNTUsInNjZW5lIjo4MSwibWFnaWNfc2l6ZSI6MCwiYm9tYmNodSI6MjU1LCJ1cGdyYWRlc18xIjpbMCwwLDAsMCwwLDAsMCwwXSwiYmlnZ2Vyb25fZmxhZyI6MCwicXVlc3RfMiI6WzAsMCwwLDAsMCwwLDAsMF0sImRpbnMiOjI1NSwic2xpbmdzaG90IjoyNTUsImhvb2tzaG90IjoyNTUsInN3b3JkcyI6WzAsMCwwLDAsMCwwLDAsMF0sInF1ZXN0XzEiOlswLDAsMCwwLDAsMCwwLDBdLCJiZWFucyI6MjU1LCJ1cGdyYWRlc18zIjpbMCwwLDAsMCwwLDAsMCwwXSwiZmFycm93IjoyNTUsInBhY2tldF9pZCI6ImN1cnJlbnRfZGF0YSJ9", 'base64'));
 }
 
 function parseData(data) {
@@ -253,12 +735,13 @@ function parseData(data) {
         unpack = JSON.parse(data);
         let decode = Buffer.from(unpack.data, 'base64');
         let incoming = JSON.parse(decode);
+        incoming["packet_id"] = unpack.packet_id;
         if (incoming.hasOwnProperty("seed")) {
             seed = incoming.seed;
             console.log("Randomizer seed: " + seed);
             return;
         }
-        if (processData(incoming, my_uuid)) {
+        if (processData(incoming, CONFIG.my_uuid)) {
             sendDataToMaster(incoming);
         }
     } catch (err) {
@@ -272,84 +755,10 @@ function parseData(data) {
     }
 }
 
-let emuhawk = null;
-let packet_buffer = "";
-
-let zServer = net.createServer(function (socket) {
-    console.log("Connected to BizHawk!");
-    emuhawk = socket;
-    sendJustText("Connected to node!");
-    if (isClient) {
-        setupClient();
-    }
-    socket.setEncoding('ascii');
-    socket.on('data', function (data) {
-        try {
-            let dataStream = data.split("\r\n");
-            for (let i = 0; i < dataStream.length; i++) {
-                if (dataStream[i] === "") {
-                    continue;
-                }
-                // This shit literally only triggers on Pierre's data because its comically huge by Oot standards.
-                if (dataStream[i].indexOf("}") === -1) {
-                    // Incomplete data.
-                    packet_buffer = dataStream[i];
-                    continue;
-                } else if (dataStream[i].indexOf("{") === -1) {
-                    // This must be the other half.
-                    packet_buffer += dataStream[i];
-                } else {
-                    packet_buffer = dataStream[i];
-                }
-                parseData(packet_buffer);
-            }
-        } catch (err) {
-            if (err) {
-                console.log(err);
-                console.log("---------------------");
-                console.log("Something went wrong!");
-                console.log("---------------------");
-                console.log(packet_buffer);
-                packet_buffer = "";
-            }
-        }
-    });
-});
-
-let awaiting_send = [];
-
-if (isClient) {
-    server = restify.createServer();
-    server.name = "Oot Randomizer Co-op";
-    server.use(restify.plugins.bodyParser());
-    server.listen(process.env.port || process.env.PORT || 8082, function () {
-        console.log('%s listening to %s', server.name, server.url);
-    });
-
-    if (isTracker) {
-        console.log("Setting up item tracker...");
-        if (fs.existsSync("./overlay/overlay.html")) {
-            server.pre(serveStatic('./overlay', {'index': ['overlay.html']}));
-        }
-        server.get('/oot/randomizer/data', function (req, res, next) {
-            res.send(OotOverlay_data);
-            next();
-        });
-    }
-    server.get('/oot/randomizer/awaiting', function (req, res, next) {
-        res.send(awaiting_send);
-        awaiting_send.length = 0;
-        next();
-    });
-    zServer.listen(1337, '127.0.0.1', function () {
-        console.log("Awaiting connection. Please load the .lua script in Bizhawk.");
-    });
-}
-
 function send(data) {
     let json = JSON.stringify(data);
     let packet = Buffer.from(json).toString('base64');
-    awaiting_send.push(packet);
+    emu.awaiting_send.push(packet);
 }
 
 function sendJustText(text) {
@@ -375,7 +784,7 @@ function getKeyTranslation(key, int) {
 }
 
 // Oot inventory and world state management.
-let OotStorage = null;
+var OotStorage = null;
 let OotOverlay_data = {};
 let SceneStorage = {};
 let FlagStorage = {};
@@ -383,6 +792,10 @@ let SkulltulaStorage = {};
 // Pierre takes up so much space he deserves his own object... lol.
 let ScarecrowStorage = null;
 let hasPierre = false;
+let DungeonStorage = {
+    items: {},
+    small_keys: {}
+};
 
 let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "bottle1", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bottle2", "bombchu", "bombs", "bottle4", "bottle3", "dins", "slingshot", "hookshot", "beans"];
 let inventory_blank = 255;
@@ -525,12 +938,10 @@ registerKeyTranslation("hearts", "Heart Container");
 registerKeyTranslation("magic_size", "Enhanced Magic Meter");
 registerKeyTranslation("magic_limit", function (data) {
     switch (data) {
-        case 30:
+        case 48:
             return "Standard Magic Meter Capacity";
-        case 60:
+        case 96:
             return "Enhanced Magic Meter Capacity";
-        default:
-            return "";
     }
 });
 
@@ -546,14 +957,14 @@ function registerSpecialIntHandler(key, callback) {
 }
 
 registerSpecialIntHandler("magic_size", function (key, pack) {
-    if (my_uuid !== pack["uuid"]) {
+    if (CONFIG.my_uuid !== pack["uuid"]) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x60}};
         send(r2);
     }
 });
 
 registerSpecialIntHandler("hearts", function (key, pack) {
-    if (my_uuid !== pack["uuid"]) {
+    if (CONFIG.my_uuid !== pack["uuid"]) {
         let r2 = {
             message: "Filling up your health due to gaining a heart container...",
             payload: {heal: 101}
@@ -575,7 +986,7 @@ function intHandler(pack) {
             if ((OotStorage[v] < data[v])) {
                 flag = true;
                 OotStorage[v] = data[v];
-                if (my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== pack["uuid"]) {
                     let r = {message: "Received " + getKeyTranslation(v, data[v]) + ".", payload: {}};
                     r.payload[v] = OotStorage[v];
                     send(r);
@@ -602,7 +1013,7 @@ function registerSpecialBoolHandler(key, callback) {
 }
 
 registerSpecialBoolHandler("magic_bool", function (key, pack) {
-    if (my_uuid !== pack["uuid"]) {
+    if (CONFIG.my_uuid !== pack["uuid"]) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x30}};
         send(r2);
     }
@@ -617,7 +1028,7 @@ function boolHandler(pack) {
             if ((OotStorage[v] === 0 && data[v] !== 0)) {
                 flag = true;
                 OotStorage[v] = data[v];
-                if (my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== pack["uuid"]) {
                     let r = {message: "Received " + getKeyTranslation(v, data[v]) + ".", payload: {}};
                     r.payload[v] = OotStorage[v];
                     send(r);
@@ -648,7 +1059,7 @@ function genericBundleHandler(pack, keyMap, storageKey) {
             if ((OotStorage[storageKey][bit] === 0 && data[storageKey][bit] === 1)) {
                 flag = true;
                 OotStorage[storageKey][bit] = data[storageKey][bit];
-                if (my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== pack["uuid"]) {
                     let r = {message: "Received " + getKeyTranslation(key, data[storageKey][bit]) + ".", payload: {}};
                     r.payload[storageKey] = OotStorage[storageKey];
                     send(r);
@@ -737,7 +1148,7 @@ function genericUpgradeHandler(pack, targets, storageKey, payloads) {
                 });
                 flag = true;
                 console.log(key + " " + theirLevel);
-                if (my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== pack["uuid"]) {
                     let k = key + " " + theirLevel;
                     let r = {
                         message: "Received " + getKeyTranslation(key + "_u", Number(theirLevel)) + ".",
@@ -988,13 +1399,12 @@ function updateInventory(pack) {
             if (inventory_special_handlers[handler](inventory_keys[key], val, data)) {
                 OotStorage[inventory_keys[key]] = data[inventory_keys[key]];
                 val = OotStorage[inventory_keys[key]];
-                if (my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== pack["uuid"]) {
                     let r = {message: "Received " + getKeyTranslation(inventory_keys[key], val) + ".", payload: {}};
                     r.payload[inventory_keys[key]] = data[inventory_keys[key]];
                     if (inventory_amount_handlers.hasOwnProperty(inventory_keys[key])) {
                         r.payload[inventory_keys[key] + "_count"] = inventory_amount_handlers[inventory_keys[key]]();
                     }
-                    console.log(r);
                     send(r);
                 }
                 if (OotStorage[inventory_keys[key]] !== 255) {
@@ -1095,7 +1505,7 @@ function updateScenes(data) {
                 addr: data.addr,
                 scene_data: {}
             };
-            if (my_uuid !== data["uuid"]) {
+            if (CONFIG.my_uuid !== data["uuid"]) {
                 r["scene_data"] = SceneStorage["scene_data"][data.addr];
                 send(r);
             }
@@ -1151,7 +1561,7 @@ function updateSkulltulas(s) {
             } else {
                 scount = SkulltulaStorage.skull_tokens_count;
             }
-            if (my_uuid !== s["uuid"]) {
+            if (CONFIG.my_uuid !== s["uuid"]) {
                 let r = {
                     message: "New Skulltula Count: " + scount,
                     addr: s.addr,
@@ -1185,7 +1595,7 @@ function createFlagEventTrigger(addr, callback) {
 createFlagEventTrigger("0x11b4b6", function (data) {
     // This is the flag when a player talks to Pierre as adult after having talked to him as child.
     if (data.data[3] === 1) {
-        if (data["uuid"] === my_uuid) {
+        if (data["uuid"] === CONFIG.my_uuid) {
             sendJustText("Scarecrow's song detected.");
             sendJustText("Incoming lag spike.");
             setTimeout(function () {
@@ -1199,7 +1609,7 @@ createFlagEventTrigger("0x11b4b6", function (data) {
 createFlagEventTrigger("0x11b4a6", function (data) {
     // This is Epona.
     if (data.data[7] === 1) {
-        if (data["uuid"] !== my_uuid) {
+        if (data["uuid"] !== CONFIG.my_uuid) {
             sendJustText("Your partner acquired Epona.");
             sendJustText("If she won't come when you play the song...");
             sendJustText("... enter and exit Lon Lon Ranch.")
@@ -1214,7 +1624,7 @@ function updateScarecrow(data) {
         if (ScarecrowStorage === null && !hasPierre) {
             ScarecrowStorage = {};
             ScarecrowStorage = data.payload.scarecrow_data;
-            if (data["uuid"] !== my_uuid) {
+            if (data["uuid"] !== CONFIG.my_uuid) {
                 sendJustText("Scarecrow's song detected.");
                 sendJustText("Incoming lag spike.");
                 setTimeout(function () {
@@ -1254,7 +1664,7 @@ function updateFlags(flag) {
             }
         }
         if (update_required) {
-            if (my_uuid !== flag["uuid"]) {
+            if (CONFIG.my_uuid !== flag["uuid"]) {
                 let r = {message: "Flag update received: " + flag.addr + ".", addr: flag.addr, flag_data: {}};
                 r["flag_data"] = FlagStorage["flag_data"][flag.addr];
                 send(r);
@@ -1272,6 +1682,171 @@ function updateFlags(flag) {
         console.log(err);
     }
     return update_required;
+}
+
+let dungeon_names = {};
+
+function registerDungeonName(addr, name) {
+    dungeon_names[addr] = name;
+}
+
+function getDungeonName(addr) {
+    if (dungeon_names.hasOwnProperty(addr)) {
+        return dungeon_names[addr];
+    }
+    return addr;
+}
+
+// Map, Compass, Boss Key
+registerDungeonName("0x11A678", "Great Deku Tree");
+registerDungeonName("0x11A679", "Dodongo's Cavern");
+registerDungeonName("0x11A67A", "Jabu Jabu");
+registerDungeonName("0x11A67B", "Forest Temple");
+registerDungeonName("0x11A67C", "Fire Temple");
+registerDungeonName("0x11A67D", "Water Temple");
+registerDungeonName("0x11A67E", "Spirit Temple");
+registerDungeonName("0x11A67F", "Shadow Temple");
+registerDungeonName("0x11A680", "Bottom of the Well");
+registerDungeonName("0x11A681", "Ice Cavern");
+registerDungeonName("0x11A682", "Ganon's Tower");
+registerDungeonName("0x11A683", "Gerudo Training Grounds");
+registerDungeonName("0x11A684", "Ganon's Castle");
+registerDungeonName("0x11A685", "Ganon's Tower Collapse");
+
+let dungeon_item_names = {};
+
+function registerDungeonItemName(bit, name) {
+    dungeon_item_names[bit.toString()] = name;
+}
+
+function getDungeonItemName(bit) {
+    let b = bit.toString();
+    if (dungeon_item_names.hasOwnProperty(b)) {
+        return dungeon_item_names[b];
+    }
+    return b;
+}
+
+registerDungeonItemName(5, "Map");
+registerDungeonItemName(6, "Compass");
+registerDungeonItemName(7, "Boss Key");
+
+function updateDungeonItems(d) {
+    if (!DungeonStorage.items.hasOwnProperty(d.addr)) {
+        DungeonStorage.items[d.addr] = d.data;
+        console.log("Writing initial dungeon item data for address " + d.addr);
+    }
+    let list = [];
+    let update_required = false;
+    let message = "";
+    message += getDungeonName(d.addr);
+    message += " ";
+    try {
+        for (let i = 0; i < DungeonStorage.items[d.addr].length; i++) {
+            if (DungeonStorage.items[d.addr][i] === 0 && d.data[i] === 1) {
+                DungeonStorage.items[d.addr][i] = d.data[i];
+                update_required = true;
+                list.push(d.addr + " | " + i);
+                message += getDungeonItemName(i);
+            }
+        }
+        if (update_required) {
+            if (CONFIG.my_uuid !== d["uuid"]) {
+                let r = {message: message, addr: d.addr, dungeon_items: {}};
+                r["dungeon_items"] = DungeonStorage.items[d.addr];
+                send(r);
+            }
+            console.log("Dungeon Update required! " + d.addr);
+            for (let k = 0; k < list.length; k++) {
+                //sendJustText(list[k]);
+                console.log(list[k]);
+            }
+        }
+    } catch (err) {
+        console.log(err);
+    }
+    return update_required;
+}
+
+// Small Keys
+registerDungeonName("0x11A68C", "Great Deku Tree");
+registerDungeonName("0x11A68D", "Dodongo's Cavern");
+registerDungeonName("0x11A68E", "Jabu Jabu");
+registerDungeonName("0x11A68F", "Forest Temple");
+registerDungeonName("0x11A690", "Fire Temple");
+registerDungeonName("0x11A691", "Water Temple");
+registerDungeonName("0x11A692", "Spirit Temple");
+registerDungeonName("0x11A693", "Shadow Temple");
+registerDungeonName("0x11A694", "Bottom of the Well");
+registerDungeonName("0x11A695", "Ice Cavern");
+registerDungeonName("0x11A696", "Ganon's Tower");
+registerDungeonName("0x11A697", "Gerudo Training Grounds");
+registerDungeonName("0x11A699", "Ganon's Castle");
+registerDungeonName("0x11A69A", "Ganon's Tower Collapse");
+
+class DungeonSmallKeyTracker {
+    constructor() {
+        this._keyCount = 0;
+    }
+
+    get keyCount() {
+        return this._keyCount;
+    }
+
+    set keyCount(value) {
+        this._keyCount = value;
+        console.log("Keys are now " + this._keyCount);
+    }
+
+    getDelta(int) {
+        let diff = Math.abs(this.keyCount - int);
+        if (this.keyCount > int) {
+            diff /= -1;
+        }
+        this.keyCount += diff;
+        return diff;
+    }
+}
+
+let DungeonKeyTrackers = {};
+
+function updateDungeonKeyTrackers(update) {
+    // 255 is 0 in the Zelda64 engine.
+    if (update.dungeon_key_payload === 255) {
+        return;
+    }
+    if (!DungeonKeyTrackers.hasOwnProperty(update.addr)) {
+        DungeonKeyTrackers[update.addr] = new DungeonSmallKeyTracker();
+        console.log("Creating dungeon small key tracker for address " + update.addr + ".");
+    }
+    let delta = DungeonKeyTrackers[update.addr].getDelta(update.dungeon_key_payload);
+    let msg = getDungeonName(update.addr) + " small key ";
+    if (delta > 0) {
+        msg += "+";
+    }
+    msg += delta.toString();
+    if (delta !== 0) {
+        sendDataToMaster({message: msg, dungeon_key_delta: delta, addr: update.addr});
+    }
+}
+
+function processDungeonKeyDelta(update) {
+    if (!DungeonKeyTrackers.hasOwnProperty(update.addr)) {
+        DungeonKeyTrackers[update.addr] = new DungeonSmallKeyTracker();
+        console.log("Creating dungeon small key tracker for address " + update.addr + ".");
+    }
+    DungeonKeyTrackers[update.addr].keyCount += update.dungeon_key_delta;
+    send(update);
+}
+
+let seen_ganon_message = false;
+
+function checkForGanon(d) {
+    if (d.scene === 25 && (CONFIG.my_uuid !== d.uuid) && !seen_ganon_message) {
+        sendJustText("An ally has engaged Ganon!");
+        send({message: "Press Dpad Left to join them!", ganon: true});
+        seen_ganon_message = true;
+    }
 }
 
 // Generic helpers
