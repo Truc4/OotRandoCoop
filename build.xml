@@ -5,7 +5,7 @@
     <property name="ini" value="./OotRandoCoop-config.ini"/>
     <property name="dist" value="./dist"/>
     <property name="bin" value="./bin"/>
-    <property name="major" value="1"/>
+    <property name="major" value="2"/>
     <property name="minor" value="0"/>
     <property name="emu" value="./src/for_emulator"/>
 
