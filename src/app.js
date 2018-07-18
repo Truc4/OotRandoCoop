@@ -25,150 +25,7 @@ const natUpnp = require('nat-upnp');
 const IO_Server = require('socket.io');
 const IO_Client = require('socket.io-client');
 const hri = require('human-readable-ids').hri;
-const libui = require('libui-node');
 const crypto = require('crypto');
-
-class GUI {
-    constructor() {
-        this._controls = {};
-        this._window = libui.UiWindow("Oot Rando Co-op Node", 400, 300, true);
-        this._window.margined = 1;
-        this._form = new libui.UiForm();
-        this._form.padded = true;
-        this._hBox = new libui.UiVerticalBox();
-        this._hBox.padded = true;
-        this._hBox.append(this._form, 1);
-        this._window.setChild(this._hBox);
-
-        this._window.onClosing(() => {
-            this._window.close();
-            libui.stopLoop();
-            process.exit();
-        });
-
-        (function (inst) {
-            GUI.createTextBox(inst, inst.form, "Nickname", CONFIG.nickname, function () {
-                CONFIG.nickname = inst.controls["Nickname"].text;
-                CONFIG.save();
-            });
-            GUI.createTextBox(inst, inst.form, "Server", CONFIG.master_server_ip, function () {
-                CONFIG.master_server_ip = inst.controls["Server"].text;
-                CONFIG.save();
-            });
-            GUI.createTextBox(inst, inst.form, "Port", CONFIG.master_server_port, function () {
-                CONFIG.master_server_port = inst.controls["Port"].text;
-                CONFIG.save();
-            });
-            GUI.createTextBox(inst, inst.form, "Room", CONFIG.GAME_ROOM, function () {
-                CONFIG.GAME_ROOM = inst.controls["Room"].text;
-                CONFIG.save();
-            });
-            GUI.createPasswordBox(inst, inst.form, "Password", CONFIG.game_password, function () {
-                CONFIG.game_password = inst.controls["Password"].text;
-                CONFIG.save();
-            });
-            GUI.createCheckBox(inst, inst.form, "Run Master Server?", CONFIG.isMaster, function () {
-                CONFIG.isMaster = inst.controls["Run Master Server?"].getChecked();
-                CONFIG.save();
-            });
-            GUI.createCheckBox(inst, inst.form, "Run Client?", CONFIG.isClient, function () {
-                CONFIG.isClient = inst.controls["Run Client?"].getChecked();
-                CONFIG.save();
-            });
-            GUI.createCheckBox(inst, inst.form, "Run Tracker?", CONFIG.isTracker, function () {
-                CONFIG.isTracker = inst.controls["Run Tracker?"].getChecked();
-                CONFIG.save();
-            });
-            GUI.createButton(inst, inst.hBox, "Connect", "Connect", function () {
-                if (CONFIG.isMaster) {
-                    if (master === null) {
-                        master = new MasterServer();
-                        master.setup();
-                    }
-                }
-                if (CONFIG.isClient) {
-                    client = new Client();
-                    client.setup();
-                }
-            });
-        })(this);
-        this._window.show();
-        libui.startLoop();
-    }
-
-    get controls() {
-        return this._controls;
-    }
-
-    set controls(value) {
-        this._controls = value;
-    }
-
-    get form() {
-        return this._form;
-    }
-
-    set form(value) {
-        this._form = value;
-    }
-
-    get hBox() {
-        return this._hBox;
-    }
-
-    set hBox(value) {
-        this._hBox = value;
-    }
-
-    get name() {
-        return this._name;
-    }
-
-    set name(value) {
-        this._name = value;
-    }
-
-    get window() {
-        return this._window;
-    }
-
-    set window(value) {
-        this._window = value;
-    }
-
-    static createTextBox(inst, parent, name, value, callback = function () {
-    }) {
-        inst.controls[name] = new libui.UiEntry();
-        inst.controls[name].text = value;
-        inst.controls[name].onChanged(callback);
-        parent.append(name, inst.controls[name], 0);
-    }
-
-    static createPasswordBox(inst, parent, name, value, callback = function () {
-    }) {
-        inst.controls[name] = new libui.UiPasswordEntry();
-        inst.controls[name].text = value;
-        inst.controls[name].onChanged(callback);
-        parent.append(name, inst.controls[name], 0);
-    }
-
-    static createButton(inst, parent, name, value, callback = function () {
-    }) {
-        inst.controls[name] = new libui.UiButton();
-        inst.controls[name].text = value;
-        inst.controls[name].onClicked(callback);
-        parent.append(inst.controls[name], 0);
-    }
-
-    static createCheckBox(inst, parent, name, value, callback = function () {
-    }) {
-        inst.controls[name] = new libui.UiCheckbox();
-        inst.controls[name].text = name;
-        inst.controls[name].setChecked(value);
-        inst.controls[name].onToggled(callback);
-        parent.append("", inst.controls[name], 0);
-    }
-}
 
 // Config
 
@@ -408,6 +265,7 @@ class Client {
             websocket.on('connect', function () {
                 websocket.emit('room', encodeDataForClient({
                     room: CONFIG.GAME_ROOM,
+                    nickname: CONFIG.nickname,
                     password: CONFIG.getPasswordHash()
                 }));
             });
@@ -605,20 +463,15 @@ let master = null;
 let client = null;
 let emu = null;
 
-if (CONFIG.show_gui) {
-    const gui = new GUI();
-} else {
-    if (CONFIG.isMaster) {
-        master = new MasterServer();
-        master.setup();
-    }
-
-    if (CONFIG.isClient) {
-        client = new Client();
-        client.setup();
-    }
+if (CONFIG.isMaster) {
+    master = new MasterServer();
+    master.setup();
 }
 
+if (CONFIG.isClient) {
+    client = new Client();
+    client.setup();
+}
 emu = new EmuConnection();
 
 function sendDataToMaster(data) {
