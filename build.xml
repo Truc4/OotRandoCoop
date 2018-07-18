@@ -49,7 +49,6 @@
         <copy todir="${tfolder}/overlay" >
             <fileset dir="./overlay" includes="**"/>
         </copy>
-        <copy file="${ini}" tofile="${tfolder}/OotRandoCoop-config.ini"/>
     </target>
 
     <target name="compile_scripts">
