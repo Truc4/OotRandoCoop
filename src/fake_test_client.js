@@ -3,10 +3,11 @@
 
 const IO_Client = require('socket.io-client');
 const lzw = require("node-lzw");
+const crypto = require('crypto');
 
 let master_server_ip = "127.0.0.1";
 let master_server_port = "8081";
-let GAME_ROOM = "test-room-1";
+let GAME_ROOM = "strong-catfish-32";
 let nickname = "Lynn";
 let my_uuid = "";
 
@@ -21,7 +22,7 @@ function encodeDataForClient(data) {
 const websocket = new IO_Client("http://" + master_server_ip + ":" + master_server_port);
 
 websocket.on('connect', function () {
-    websocket.emit('room', encodeDataForClient({room: GAME_ROOM, password: ""}));
+    websocket.emit('room', encodeDataForClient({nickname: nickname, room: GAME_ROOM, password: crypto.createHash('md5').update("").digest("hex")}));
 });
 
 websocket.on('room_verified', function (data) {
@@ -33,7 +34,7 @@ websocket.on('room_verified', function (data) {
             nickname: nickname
         }));
     } else {
-        console.log("Request for room " + parse.room + " was denied due to an invalid password.");
+        console.log("Request for room " + GAME_ROOM + " was denied due to an invalid password.");
     }
 });
 
@@ -68,5 +69,5 @@ websocket.on('initial_sync', function (data) {
 
 websocket.on('msg', function (data) {
     let parse = decodeDataFromClient(data);
-    console.log(parse);
+    console.log(JSON.stringify(parse, null, 2));
 });

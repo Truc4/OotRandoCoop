@@ -28,7 +28,6 @@ const hri = require('human-readable-ids').hri;
 const crypto = require('crypto');
 
 // Config
-
 class Configuration {
 
     constructor() {
@@ -48,8 +47,6 @@ class Configuration {
             this.cfg.CLIENT["nickname"] = "Player";
             this.cfg.CLIENT["game_room"] = hri.random();
             this.cfg.CLIENT["game_password"] = "";
-            this.cfg.GUI = {};
-            this.cfg.GUI["show_gui"] = true;
             fs.writeFileSync(this.file, JSON.stringify(this.cfg, null, 2));
         }
         this._master_server_ip = this.cfg.SERVER.master_server_ip;
@@ -60,7 +57,6 @@ class Configuration {
         this._nickname = this.cfg.CLIENT.nickname;
         this._GAME_ROOM = this.cfg.CLIENT.game_room;
         this._game_password = this.cfg.CLIENT.game_password;
-        this._show_gui = this.cfg.GUI.show_gui;
     }
 
     get game_password() {
@@ -69,14 +65,6 @@ class Configuration {
 
     set game_password(value) {
         this._game_password = value;
-    }
-
-    get show_gui() {
-        return this._show_gui;
-    }
-
-    set show_gui(value) {
-        this._show_gui = value;
     }
 
     get my_uuid() {
@@ -498,15 +486,22 @@ function processData(incoming, uuid) {
     let doesUpdate = true;
     if (incoming.hasOwnProperty("resync_me")) {
         sendJustText("Sending resync request. Please wait...");
-        OotStorage = loadBaseData();
+        OotStorage = null;
+        initial_setup_complete = false;
         OotOverlay_data = {};
         SceneStorage = {};
         FlagStorage = {};
         SkulltulaStorage = {};
-        send({message: "Reloading gamestate...", player_connecting: true});
-        setTimeout(function () {
-            sendDataToMasterOnChannel('initial_sync', {player_connecting: true, pierre: !hasPierre});
-        }, 5000);
+        ScarecrowStorage = null;
+        hasPierre = false;
+        // Disable Pierre until we finish syncing. Give it 1 minute.
+        doNotTriggerPierreLoad = true;
+        sendJustText("Pierre upload disabled for 60 seconds...");
+        setTimeout(function(){
+            doNotTriggerPierreLoad = false;
+            sendJustText("Pierre upload re-enabled.");
+        }, 60 * 1000);
+        send({message: "Clearing node gamestate...", player_connecting: true});
         return;
     }
     if (incoming.hasOwnProperty("scene_data")) {
@@ -645,6 +640,7 @@ let SkulltulaStorage = {};
 // Pierre takes up so much space he deserves his own object... lol.
 let ScarecrowStorage = null;
 let hasPierre = false;
+let doNotTriggerPierreLoad = false;
 let DungeonStorage = {
     items: {},
     small_keys: {}
@@ -797,6 +793,8 @@ registerKeyTranslation("magic_limit", function (data) {
             return "Enhanced Magic Meter Capacity";
     }
 });
+registerKeyTranslation("beans_bought", "Magic Beans purchased +1");
+registerKeyTranslation("poe_score", "Big Poe Score Card +100");
 
 function overlayHandler(data) {
     OotOverlay_data["skull_tokens_count"] = data["skull_tokens_count"];
@@ -1447,7 +1445,7 @@ function createFlagEventTrigger(addr, callback) {
 
 createFlagEventTrigger("0x11b4b6", function (data) {
     // This is the flag when a player talks to Pierre as adult after having talked to him as child.
-    if (data.data[3] === 1) {
+    if (data.data[3] === 1 && !doNotTriggerPierreLoad) {
         if (data["uuid"] === CONFIG.my_uuid) {
             sendJustText("Scarecrow's song detected.");
             sendJustText("Incoming lag spike.");
@@ -1459,23 +1457,25 @@ createFlagEventTrigger("0x11b4b6", function (data) {
     }
 });
 
+let seen_epona = false;
+
 createFlagEventTrigger("0x11b4a6", function (data) {
     // This is Epona.
-    if (data.data[7] === 1) {
+    if (data.data[7] === 1 && !seen_epona) {
         if (data["uuid"] !== CONFIG.my_uuid) {
             sendJustText("Your partner acquired Epona.");
             sendJustText("If she won't come when you play the song...");
-            sendJustText("... enter and exit Lon Lon Ranch.")
+            sendJustText("... enter and exit Lon Lon Ranch.");
         } else {
             sendJustText("Epona acquired.");
         }
+        seen_epona = true;
     }
 });
 
 function updateScarecrow(data) {
     try {
         if (ScarecrowStorage === null && !hasPierre) {
-            ScarecrowStorage = {};
             ScarecrowStorage = data.payload.scarecrow_data;
             if (data["uuid"] !== CONFIG.my_uuid) {
                 sendJustText("Scarecrow's song detected.");

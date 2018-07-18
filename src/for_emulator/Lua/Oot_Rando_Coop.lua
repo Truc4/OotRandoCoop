@@ -106,6 +106,8 @@ memory_lookup.quest_2 = 0x11A676;
 memory_lookup.quest_3 = 0x11A677;
 memory_lookup.skull_tokens_count = 0x11A6A1;
 memory_lookup.scene = 0x1C8545;
+memory_lookup.beans_bought = 0x11A66B;
+memory_lookup.poe_score = 0x11B48E;
 
 bottles = {};
 bottles.bottle1 = 0x11A656;
@@ -250,12 +252,14 @@ read_handlers["time_of_day"] = twoByteReadHandler;
 read_handlers["rupee_count"] = twoByteReadHandler;
 read_handlers["heal"] = twoByteReadHandler;
 read_handlers["magic_limit"] = twoByteReadHandler;
+read_handlers["poe_score"] = twoByteReadHandler;
 
 write_handlers["hearts"] = twoByteWriteHandler;
 write_handlers["time_of_day"] = twoByteWriteHandler;
 write_handlers["rupee_count"] = twoByteWriteHandler;
 write_handlers["heal"] = twoByteWriteHandler;
 write_handlers["magic_limit"] = twoByteWriteHandler;
+write_handlers["poe_score"]  = twoByteWriteHandler;
 
 write_handlers["tunics"] = bundleWriteHandler;
 write_handlers["swords"] = bundleWriteHandler;
