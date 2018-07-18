@@ -9,6 +9,14 @@
     <property name="minor" value="0"/>
     <property name="emu" value="./src/for_emulator"/>
 
+    <condition property="cmd.exec" value="cmd" else="/bin/sh">
+        <os family="windows" />
+    </condition>
+
+    <condition property="cmd.con" value="/c" else="-c">
+        <os family="windows" />
+    </condition>
+
     <target name="clean">
         <delete dir="${dist}"/>
         <delete dir="${bin}"/>
@@ -27,13 +35,13 @@
 
     <target name="setup">
         <echo message="Setting up env..."/>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call npm install -g pkg"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="npm install -g pkg"/>
         </exec>
         <exec executable="cmd">
             <arg value="/c"/>
-            <arg value="call npm install"/>
+            <arg value="npm install"/>
         </exec>
         <propertyfile file="build.properties">
             <entry key="major" type="int" value="${major}" operation="="/>
@@ -53,9 +61,9 @@
 
     <target name="compile_scripts">
         <echo message="Compiling scripts..."/>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call node build.js"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="node build.js"/>
         </exec>
         <copy todir="${bin}" >
             <fileset dir="./src" includes="*.js"/>
@@ -75,16 +83,16 @@
     <target name="build_windows" depends="clean, setup, compile_scripts">
         <property file="build.properties"/>
         <echo message="Building Windows binaries..."/>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-win-x64 -o ./bin/win/x64/OotRandoCoop_${major}.${minor}.${build.number}_win64"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-win-x64 -o ./bin/win/x64/OotRandoCoop_${major}.${minor}.${build.number}_win64"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/win/x64"/>
         </antcall>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-win-x86 -o ./bin/win/x86/OotRandoCoop_${major}.${minor}.${build.number}_win32"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-win-x86 -o ./bin/win/x86/OotRandoCoop_${major}.${minor}.${build.number}_win32"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/win/x86"/>
@@ -94,16 +102,16 @@
     <target name="build_linux">
         <property file="build.properties"/>
         <echo message="Building Linux binaries"/>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-linux-x64 -o ./bin/linux/x64/OotRandoCoop_${major}.${minor}.${build.number}_linux64"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-linux-x64 -o ./bin/linux/x64/OotRandoCoop_${major}.${minor}.${build.number}_linux64"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/linux/x64"/>
         </antcall>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-linux-x86 -o ./bin/linux/x86/OotRandoCoop_${major}.${minor}.${build.number}_linux32"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-linux-x86 -o ./bin/linux/x86/OotRandoCoop_${major}.${minor}.${build.number}_linux32"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/linux/x86"/>
@@ -113,16 +121,16 @@
     <target name="build_mac">
         <property file="build.properties"/>
         <echo message="Building Mac binaries..."/>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-macos-x64 -o ./bin/macos/x64/OotRandoCoop_${major}.${minor}.${build.number}_macos64.app"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-macos-x64 -o ./bin/macos/x64/OotRandoCoop_${major}.${minor}.${build.number}_macos64.app"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/macos/x64"/>
         </antcall>
-        <exec executable="cmd">
-            <arg value="/c"/>
-            <arg value="call pkg ${bin}/app.js --targets node8-macos-x86 -o ./bin/macos/x86/OotRandoCoop_${major}.${minor}.${build.number}_macos32.app"/>
+        <exec executable="${cmd.exec}">
+            <arg value="${cmd.con}"/>
+            <arg value="pkg ${bin}/app.js --targets node8-macos-x86 -o ./bin/macos/x86/OotRandoCoop_${major}.${minor}.${build.number}_macos32.app"/>
         </exec>
         <antcall target="copy_files">
             <param name="tfolder" value="${bin}/macos/x86"/>
