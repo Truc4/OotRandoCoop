@@ -26,6 +26,7 @@ const IO_Server = require('socket.io');
 const IO_Client = require('socket.io-client');
 const hri = require('human-readable-ids').hri;
 const crypto = require('crypto');
+const https = require('https');
 
 // Config
 class Configuration {
@@ -459,8 +460,25 @@ if (CONFIG.isMaster) {
 if (CONFIG.isClient) {
     client = new Client();
     client.setup();
+    emu = new EmuConnection();
 }
-emu = new EmuConnection();
+
+if (VERSION.indexOf("@") === -1){
+    https.get('https://raw.githubusercontent.com/denoflionsx/OotRandoCoop/master/current_version.json', (resp) => {
+        let data = '';
+        resp.on('data', (chunk) => {
+            data += chunk;
+        });
+        resp.on('end', () => {
+            let v = JSON.parse(data).current_version;
+            if (v !== VERSION){
+                console.log("New version available: " + v);
+            }
+        });
+    }).on("error", (err) => {
+        console.log("Error: " + err.message);
+    });
+}
 
 function sendDataToMaster(data) {
     client.websocket.emit('msg', CONFIG.GAME_ROOM, encodeDataForClient({
@@ -1475,7 +1493,7 @@ createFlagEventTrigger("0x11b4a6", function (data) {
 
 function updateScarecrow(data) {
     try {
-        if (ScarecrowStorage === null && !hasPierre) {
+        if (!hasPierre) {
             ScarecrowStorage = data.payload.scarecrow_data;
             if (data["uuid"] !== CONFIG.my_uuid) {
                 sendJustText("Scarecrow's song detected.");
