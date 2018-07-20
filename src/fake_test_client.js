@@ -19,6 +19,14 @@ function sendDataToMaster(data) {
     }));
 }
 
+function sendDataToMasterOnChannel(channel, data) {
+    websocket.emit(channel, GAME_ROOM, encodeDataForClient({
+        uuid: my_uuid,
+        nickname: nickname,
+        payload: data
+    }));
+}
+
 function decodeDataFromClient(pack) {
     return JSON.parse(zlib.inflateSync(new Buffer(pack, 'base64')).toString());
 }
@@ -74,13 +82,23 @@ websocket.on('room_check', function (data) {
 websocket.on('room_check_resp', function (data) {
     let parse = decodeDataFromClient(data);
     console.log("Connected player: " + parse.nickname + ".");
+    sendDataToMasterOnChannel('resync', {resync_me: true});
 });
 
-websocket.on('initial_sync', function (data) {
-    console.log(decodeDataFromClient(data));
-});
 
 websocket.on('msg', function (data) {
     let parse = decodeDataFromClient(data);
-    console.log(JSON.stringify(parse, null, 2));
+    console.log(parse);
+});
+
+websocket.on('resync', function (data) {
+});
+
+websocket.on('resync_resp', function (data) {
+    let parse = decodeDataFromClient(data);
+    if (parse.payload.target === my_uuid) {
+        for (let i = 0; i < parse.payload.packets.length; i++) {
+            console.log(parse.payload.packets[i]);
+        }
+    }
 });

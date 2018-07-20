@@ -233,7 +233,7 @@ class MasterServer {
                 });
                 socket.on('resync_resp', function (room, data) {
                     let parse = decodeDataFromClient(data);
-                    socket.to(parse.target).emit('resync_resp', data);
+                    socket.to(parse.payload.target).emit('resync_resp', data);
                 });
             });
         })(this._ws_server);
@@ -312,7 +312,7 @@ class Client {
 
             websocket.on('resync', function (data) {
                 let parse = decodeDataFromClient(data);
-                if (parse.resync_me) {
+                if (parse.payload.resync_me) {
                     // Build full sync package.
                     let packets = [];
                     Object.keys(OotStorage).forEach(function (key) {
@@ -320,23 +320,23 @@ class Client {
                         p[key] = OotStorage[key];
                         packets.push(p);
                     });
-                    Object.keys(SceneStorage).forEach(function (key) {
+                    Object.keys(SceneStorage.scene_data).forEach(function (key) {
                         let p = {packet_id: "scene_" + key, scene_data: {}};
-                        p.scene_data[key] = SceneStorage[key];
+                        p.scene_data[key] = SceneStorage.scene_data[key];
                         packets.push(p);
                     });
-                    Object.keys(FlagStorage).forEach(function (key) {
+                    Object.keys(FlagStorage.flag_data).forEach(function (key) {
                         let p = {packet_id: "flag_" + key, flag_data: {}};
-                        p.flag_data[key] = FlagStorage[key];
+                        p.flag_data[key] = FlagStorage.flag_data[key];
                         packets.push(p);
                     });
-                    Object.keys(SkulltulaStorage).forEach(function (key) {
+                    Object.keys(SkulltulaStorage.skulltulas).forEach(function (key) {
                         let p = {packet_id: "skulltulas_" + key, skulltulas: {}};
-                        p.skulltulas[key] = SkulltulaStorage[key];
+                        p.skulltulas[key] = SkulltulaStorage.skulltulas[key];
                         packets.push(p);
                     });
-                    Object.keys(DungeonStorage).forEach(function (key) {
-                        let p = {packet_id: "dungeon_items", dungeon_items: DungeonStorage[key], addr: key};
+                    Object.keys(DungeonStorage.items).forEach(function (key) {
+                        let p = {packet_id: "dungeon_items", dungeon_items: DungeonStorage.items[key], addr: key};
                         packets.push(p);
                     });
                     Object.keys(DungeonKeyTrackers).forEach(function (key) {
@@ -730,8 +730,7 @@ let ScarecrowStorage = null;
 let hasPierre = false;
 let doNotTriggerPierreLoad = false;
 let DungeonStorage = {
-    items: {},
-    small_keys: {}
+    items: {}
 };
 
 let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bombchu", "bombs", "dins", "slingshot", "hookshot", "beans", "beans_bought", "poe_score", "bottle_1", "bottle_2", "bottle_3", "bottle_4"];
