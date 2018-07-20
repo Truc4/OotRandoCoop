@@ -75,6 +75,10 @@ memory_lookup.larrow = 0x11A654;
 memory_lookup.nlove = 0x11A655;
 memory_lookup.atrade = 0x11A65A;
 memory_lookup.ctrade = 0x11A65B;
+memory_lookup.bottle_1 = 0x11A656;
+memory_lookup.bottle_2 = 0x11A657;
+memory_lookup.bottle_3 = 0x11A658;
+memory_lookup.bottle_4 = 0x11A659;
 
 -- inventory counts
 memory_lookup.stick_count = 0x11A65C;
@@ -105,15 +109,8 @@ memory_lookup.quest_1 = 0x11A675;
 memory_lookup.quest_2 = 0x11A676;
 memory_lookup.quest_3 = 0x11A677;
 memory_lookup.skull_tokens_count = 0x11A6A1;
-memory_lookup.scene = 0x1C8545;
 memory_lookup.beans_bought = 0x11A66B;
 memory_lookup.poe_score = 0x11B48E;
-
-bottles = {};
-bottles.bottle1 = 0x11A656;
-bottles.bottle2 = 0x11A657;
-bottles.bottle3 = 0x11A658;
-bottles.bottle4 = 0x11A659;
 
 special_handlers = {};
 read_handlers = {};
@@ -225,19 +222,6 @@ for k, v in pairs(memory_lookup) do
     write_handlers[k] = basicWriteHandler;
 end
 
-function bottleReadHandler(lookup)
-    return readByte(bottles[lookup])
-end
-
-function bottleWriteHandler(lookup, data)
-    writeByte(bottles[lookup], data);
-end
-
-for k, v in pairs(bottles) do
-    write_handlers[k] = bottleWriteHandler;
-    read_handlers[k] = bottleReadHandler;
-end
-
 special_handlers["tunics"] = inventoryBundleSync;
 special_handlers["swords"] = inventoryBundleSync;
 special_handlers["upgrades_1"] = inventoryBundleSync;
@@ -259,7 +243,7 @@ write_handlers["time_of_day"] = twoByteWriteHandler;
 write_handlers["rupee_count"] = twoByteWriteHandler;
 write_handlers["heal"] = twoByteWriteHandler;
 write_handlers["magic_limit"] = twoByteWriteHandler;
-write_handlers["poe_score"]  = twoByteWriteHandler;
+write_handlers["poe_score"] = twoByteWriteHandler;
 
 write_handlers["tunics"] = bundleWriteHandler;
 write_handlers["swords"] = bundleWriteHandler;
@@ -276,6 +260,16 @@ function runDataFunction(lookup)
     local d = read_handlers[lookup](lookup);
     special_handlers[lookup](lookup, d);
 end
+
+current_scene = 0;
+
+function readScene()
+    current_scene = readByte(0x1C8545);
+    if (current_scene == 25) then
+        sendPacket("scene", { scene = current_scene });
+    end
+end
+
 
 function DEC_HEX(IN)
     local B, K, OUT, I, D = 16, "0123456789ABCDEF", "", 0
@@ -401,16 +395,6 @@ end
 
 -- ========
 
--- Bottles need to each be on their own packet. Grouping them with the inventory causes desyncs.
-function updateBottles()
-    for k, v in pairs(bottles) do
-        local memdump = readByte(v);
-        local payload = {};
-        payload[k] = memdump;
-        sendPacket(k, { bottle = payload });
-    end
-end
-
 scene_data = {};
 flag_data = {};
 skulltula_data = {};
@@ -423,7 +407,7 @@ function dumpScenes()
         local memdump = memory.readbyterange(addr, scene_size);
         p.addr = DEC_HEX(addr);
         p.scene_data = serializeDump(addr, memdump);
-        sendPacket(p.addr, { scene_data = p });
+        sendPacket("scene_" .. v, { scene_data = p });
     end
 end
 
@@ -462,42 +446,42 @@ function writeScarecrow(data)
 end
 
 function dumpFlags()
-    local flags_1_data = {};
     for k, v in pairs(flags_1) do
+        local f = {};
         local addr = tonumber(v);
         local memdump = readByte(addr);
-        flags_1_data[v] = toBits(memdump, 8);
+        f[v] = toBits(memdump, 8);
+        sendPacket("flag_1_" .. v, { flag_data = f });
     end
-    local flags_2_data = {};
     for k, v in pairs(flags_2) do
+        local f = {};
         local addr = tonumber(v);
         local memdump = readByte(addr);
-        flags_2_data[v] = toBits(memdump, 8);
+        f[v] = toBits(memdump, 8);
+        sendPacket("flag_2_" .. v, { flag_data = f });
     end
-    local flags_3_data = {};
     for k, v in pairs(flags_3) do
+        local f = {};
         local addr = tonumber(v);
         local memdump = readByte(addr);
-        flags_3_data[v] = toBits(memdump, 8);
+        f[v] = toBits(memdump, 8);
+        sendPacket("flag_2_" .. v, { flag_data = f });
     end
-    sendPacket("flag_1", { flag_data = flags_1_data });
-    sendPacket("flag_2", { flag_data = flags_2_data });
-    sendPacket("flag_3", { flag_data = flags_3_data });
 end
 
 function dumpSkulltulaStorage()
-    local sdata = {};
     for k, v in pairs(skulltulas) do
+        local sdata = {};
         local addr = tonumber(v);
         local memdump = readByte(addr);
         sdata[v] = toBits(memdump, 8);
+        sendPacket("skulltulas_" .. v, { skulltulas = sdata });
     end
-    sendPacket("skulltulas", { skulltulas = sdata });
 end
 
 function isSceneDungeon()
     for k, v in pairs(dungeon_scenes) do
-        if (v == current_data.scene) then
+        if (v == current_scene) then
             -- dungeon detected.
             return k;
         end
@@ -520,7 +504,7 @@ function dumpDungeonData()
         end
     else
         local d = isSceneDungeon();
-        if (d) then
+        if (d ~= nil) then
             local memdump = readByte(dungeon_stuff[d]);
             local data = toBits(memdump, 8);
             local addr = DEC_HEX(dungeon_stuff[d]);
@@ -532,13 +516,23 @@ end
 function dumpDungeonKeys(index)
     local addr = small_keys[index];
     local memdump = readByte(addr);
-    sendPacket("small_keys", { dungeon_key = index, addr = DEC_HEX(addr), dungeon_key_payload = memdump, random = math.random() });
+    sendPacket("small_keys", { dungeon_key = index, addr = DEC_HEX(addr), dungeon_key_payload = memdump });
 end
 
 function writeDungeonDelta(packet)
     local addr = tonumber(packet.addr);
     local current = readByte(addr);
-    current = current + packet.dungeon_key_delta;
+    if (current == 255) then
+        -- Initialize the storage in ram.
+        current = 0;
+        writeByte(addr, current);
+        current = readByte(addr);
+    end
+    if (packet.override ~= nil) then
+        current = packet.dungeon_key_delta;
+    else
+        current = current + packet.dungeon_key_delta;
+    end
     writeByte(addr, current);
 end
 
@@ -567,26 +561,14 @@ function sendMessage(msg)
     console.writeline(msg);
 end
 
--- Write the rom settings to file for my OBS overlay.
-romData = gameinfo.getromname();
-romData = bizstring.replace(romData, "OoT ", "");
-romData = bizstring.replace(romData, "-comp", "");
-romData = bizstring.replace(romData, "-", "\n");
-romData = bizstring.replace(romData, " ", "\n");
-writeFileRaw("romdata.txt", romData);
-
-romData = bizstring.split(romData, "\n");
-seed = 0;
-for k, v in pairs(romData) do
-    if tonumber(v) ~= nil then
-        seed = tonumber(v);
-    end;
-end
-
 function sendUpdate()
+    readScene();
     updateDataFromRAM();
-    sendPacket("current_data", current_data);
-    updateBottles();
+    for k, v in pairs(current_data) do
+        local d = {};
+        d[k] = v;
+        sendPacket(k, d);
+    end
     dumpDungeonData();
     local scene = isSceneDungeon();
     if (isKeysanity and scene ~= nil) then
@@ -672,9 +654,6 @@ function processPacketBuffer()
         if pcall(function()
             local packet = json.decode(from_base64(s));
             sendMessage(packet.message);
-            if (packet.message == "Connected to node!") then
-                sendPacket("seed", { seed = seed });
-            end
             if (packet.payload ~= nil) then
                 for k, v in pairs(packet.payload) do
                     pcall(function()
@@ -682,16 +661,9 @@ function processPacketBuffer()
                     end);
                 end
             end
-            if (packet.player_connecting ~= nil) then
-                packet_cache = {};
-                sendUpdate();
-                updateScenes();
-                updateFlags();
-            elseif (packet.scene_data ~= nil) then
-                current_data.scene_update = false;
+            if (packet.scene_data ~= nil) then
                 writeScene(packet);
             elseif (packet.flag_data ~= nil) then
-                current_data.flag_update = false;
                 writeFlags(packet);
             elseif (packet.skulltulas ~= nil) then
                 writeSkulltulas(packet);

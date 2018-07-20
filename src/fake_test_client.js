@@ -2,8 +2,8 @@
 // She mimics a normal OotRandoCoop client for testing purposes during development.
 
 const IO_Client = require('socket.io-client');
-const lzw = require("node-lzw");
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 let master_server_ip = "127.0.0.1";
 let master_server_port = "8081";
@@ -11,18 +11,31 @@ let GAME_ROOM = "strong-catfish-32";
 let nickname = "Lynn";
 let my_uuid = "";
 
+function sendDataToMaster(data) {
+    websocket.emit('msg', GAME_ROOM, encodeDataForClient({
+        uuid: my_uuid,
+        nickname: nickname,
+        payload: data
+    }));
+}
+
 function decodeDataFromClient(pack) {
-    return JSON.parse(lzw.decode(pack));
+    return JSON.parse(zlib.inflateSync(new Buffer(pack, 'base64')).toString());
 }
 
 function encodeDataForClient(data) {
-    return lzw.encode(JSON.stringify(data));
+    return zlib.deflateSync(JSON.stringify(data)).toString('base64');
 }
+
 
 const websocket = new IO_Client("http://" + master_server_ip + ":" + master_server_port);
 
 websocket.on('connect', function () {
-    websocket.emit('room', encodeDataForClient({nickname: nickname, room: GAME_ROOM, password: crypto.createHash('md5').update("").digest("hex")}));
+    websocket.emit('room', encodeDataForClient({
+        nickname: nickname,
+        room: GAME_ROOM,
+        password: crypto.createHash('md5').update("").digest("hex")
+    }));
 });
 
 websocket.on('room_verified', function (data) {

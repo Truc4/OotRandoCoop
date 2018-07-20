@@ -20,7 +20,7 @@ const restify = require('restify');
 const fs = require("fs");
 const net = require('net');
 const serveStatic = require('serve-static-restify');
-const lzw = require("node-lzw");
+const zlib = require('zlib');
 const natUpnp = require('nat-upnp');
 const IO_Server = require('socket.io');
 const IO_Client = require('socket.io-client');
@@ -168,7 +168,6 @@ class MasterServer {
         CONFIG.master_server_ip = "127.0.0.1";
 
         this._ws_server = new IO_Server(CONFIG.master_server_port);
-        this._ws_server["OotRooms"] = {};
     }
 
     get upnp_client() {
@@ -228,6 +227,13 @@ class MasterServer {
                 });
                 socket.on('msg', function (room, data) {
                     socket.to(room).emit('msg', data);
+                });
+                socket.on('resync', function (room, data) {
+                    socket.to(room).emit('resync', data);
+                });
+                socket.on('resync_resp', function (room, data) {
+                    let parse = decodeDataFromClient(data);
+                    socket.to(parse.target).emit('resync_resp', data);
                 });
             });
         })(this._ws_server);
@@ -298,21 +304,67 @@ class Client {
                 sendJustText("Connected player: " + parse.nickname + ".");
             });
 
-            websocket.on('initial_sync', function (data) {
-                send({message: "Sending initial data to partners...", player_connecting: true});
-                if (hasPierre && data.pierre) {
-                    sendJustText("Sending Pierre to new player.");
-                    sendJustText("Incoming lag spike.");
-                    setTimeout(function () {
-                        send({message: "Querying for Pierre data...", scarecrow: true});
-                    }, 30000);
-                }
-            });
-
             websocket.on('msg', function (data) {
                 let parse = decodeDataFromClient(data);
                 let incoming = parse.payload;
                 processData(incoming, parse.uuid);
+            });
+
+            websocket.on('resync', function (data) {
+                let parse = decodeDataFromClient(data);
+                if (parse.resync_me) {
+                    // Build full sync package.
+                    let packets = [];
+                    Object.keys(OotStorage).forEach(function (key) {
+                        let p = {packet_id: key};
+                        p[key] = OotStorage[key];
+                        packets.push(p);
+                    });
+                    Object.keys(SceneStorage).forEach(function (key) {
+                        let p = {packet_id: "scene_" + key, scene_data: {}};
+                        p.scene_data[key] = SceneStorage[key];
+                        packets.push(p);
+                    });
+                    Object.keys(FlagStorage).forEach(function (key) {
+                        let p = {packet_id: "flag_" + key, flag_data: {}};
+                        p.flag_data[key] = FlagStorage[key];
+                        packets.push(p);
+                    });
+                    Object.keys(SkulltulaStorage).forEach(function (key) {
+                        let p = {packet_id: "skulltulas_" + key, skulltulas: {}};
+                        p.skulltulas[key] = SkulltulaStorage[key];
+                        packets.push(p);
+                    });
+                    Object.keys(DungeonStorage).forEach(function (key) {
+                        let p = {packet_id: "dungeon_items", dungeon_items: DungeonStorage[key], addr: key};
+                        packets.push(p);
+                    });
+                    Object.keys(DungeonKeyTrackers).forEach(function (key) {
+                        let p = {
+                            packet_id: "resync_keys",
+                            tracker: {
+                                addr: key,
+                                value: DungeonKeyTrackers[key].keyCount,
+                                timestamp: DungeonKeyTrackers[key].last_timestamp
+                            }
+                        };
+                        packets.push(p);
+                    });
+                    if (hasPierre) {
+                        let sc = {packet_id: "scarecrow", scarecrow_data: {}};
+                        sc.scarecrow_data = ScarecrowStorage;
+                        packets.push(sc);
+                    }
+                    sendDataToMasterOnChannel('resync_resp', {packets: packets, target: parse.uuid});
+                }
+            });
+            websocket.on('resync_resp', function (data) {
+                let parse = decodeDataFromClient(data);
+                if (parse.payload.target === CONFIG.my_uuid) {
+                    for (let i = 0; i < parse.payload.packets.length; i++) {
+                        parseData(parse.payload.packets[i], parse.uuid);
+                    }
+                }
             });
         })(this._websocket, this);
     }
@@ -441,11 +493,11 @@ class EmuConnection {
 const CONFIG = new Configuration();
 
 function decodeDataFromClient(pack) {
-    return JSON.parse(lzw.decode(pack));
+    return JSON.parse(zlib.inflateSync(new Buffer(pack, 'base64')).toString());
 }
 
 function encodeDataForClient(data) {
-    return lzw.encode(JSON.stringify(data));
+    return zlib.deflateSync(JSON.stringify(data)).toString('base64');
 }
 
 let master = null;
@@ -463,7 +515,7 @@ if (CONFIG.isClient) {
     emu = new EmuConnection();
 }
 
-if (VERSION.indexOf("@") === -1){
+if (VERSION.indexOf("@") === -1) {
     https.get('https://raw.githubusercontent.com/denoflionsx/OotRandoCoop/master/current_version.json', (resp) => {
         let data = '';
         resp.on('data', (chunk) => {
@@ -471,7 +523,7 @@ if (VERSION.indexOf("@") === -1){
         });
         resp.on('end', () => {
             let v = JSON.parse(data).current_version;
-            if (v !== VERSION){
+            if (v !== VERSION) {
                 console.log("New version available: " + v);
             }
         });
@@ -497,95 +549,118 @@ function sendDataToMasterOnChannel(channel, data) {
 }
 
 // Basic server for talking to Bizhawk.
-let seed = 0;
 let initial_setup_complete = false;
+let data_handlers = {};
+
+function registerDataHandler(packetid, callback) {
+    if (!data_handlers.hasOwnProperty(packetid)) {
+        data_handlers[packetid] = callback;
+    }
+}
+
+function registerDataHandlers(arr, callback) {
+    for (let i = 0; i < arr.length; i++) {
+        registerDataHandler(arr[i], callback);
+    }
+}
+
+function runDataHandler(packetid, incoming, uuid) {
+    if (data_handlers.hasOwnProperty(packetid)) {
+        return data_handlers[packetid](incoming, uuid);
+    } else {
+        return false;
+    }
+}
+
+registerDataHandler("resync_me", function (incoming, uuid) {
+    sendJustText("Sending resync request. Please wait...");
+    sendDataToMasterOnChannel('resync', {resync_me: true});
+    return false;
+});
+
+function processScenePacket(incoming, uuid) {
+    updateScenes({
+        addr: incoming.scene_data.addr,
+        scene_data: incoming.scene_data.scene_data,
+        uuid: uuid
+    });
+    return true;
+}
+
+function processFlagPacket(incoming, uuid) {
+    Object.keys(incoming.flag_data).forEach(function (key) {
+        updateFlags({addr: key, data: incoming.flag_data[key], uuid: uuid})
+    });
+    return true;
+}
+
+function processSkulltulaPacket(incoming, uuid) {
+    Object.keys(incoming.skulltulas).forEach(function (key) {
+        updateSkulltulas({addr: key, data: incoming.skulltulas[key], uuid: uuid})
+    });
+    return true;
+}
+
+registerDataHandler("dungeon_items", function (incoming, uuid) {
+    return updateDungeonItems({addr: incoming.addr, data: incoming.dungeon_items, uuid: uuid});
+});
+
+registerDataHandler("small_keys", function (incoming, uuid) {
+    // Don't send this to the server directly. We'll send a delta from the handler itself.
+    updateDungeonKeyTrackers(incoming);
+    return false;
+});
+
+registerDataHandler("dungeon_key_delta", function (incoming, uuid) {
+    processDungeonKeyDelta(incoming);
+    return false;
+});
+
+registerDataHandler("scarecrow", function (incoming, uuid) {
+    if (uuid === CONFIG.my_uuid) {
+        sendDataToMaster(incoming);
+    }
+    updateScarecrow({uuid: uuid, payload: incoming});
+});
+
+registerDataHandler("resync_keys", function (incoming, uuid) {
+    if (!DungeonKeyTrackers.hasOwnProperty(incoming.addr)) {
+        processDungeonKeyDelta({addr: incoming.addr, dungeon_key_delta: incoming.value});
+    } else {
+        if (incoming.timestamp > DungeonKeyTrackers[incoming.addr].last_timestamp) {
+            DungeonKeyTrackers[incoming.addr].keyCount = incoming.value;
+            DungeonKeyTrackers[incoming.addr].last_timestamp = new Date().getMilliseconds();
+            send({
+                message: "Updating dungeon keys...",
+                dungeon_key_delta: DungeonKeyTrackers[incoming.addr].keyCount,
+                addr: incoming.addr,
+                packet_id: "dungeon_key_delta",
+                override: true
+            });
+        }
+    }
+});
 
 function processData(incoming, uuid) {
-    let doesUpdate = true;
-    if (incoming.hasOwnProperty("resync_me")) {
-        sendJustText("Sending resync request. Please wait...");
-        OotStorage = null;
-        initial_setup_complete = false;
-        OotOverlay_data = {};
-        SceneStorage = {};
-        FlagStorage = {};
-        SkulltulaStorage = {};
-        ScarecrowStorage = null;
-        hasPierre = false;
-        // Disable Pierre until we finish syncing. Give it 1 minute.
-        doNotTriggerPierreLoad = true;
-        sendJustText("Pierre upload disabled for 60 seconds...");
-        setTimeout(function(){
-            doNotTriggerPierreLoad = false;
-            sendJustText("Pierre upload re-enabled.");
-        }, 60 * 1000);
-        send({message: "Clearing node gamestate...", player_connecting: true});
-        return;
+    let doesUpdate = false;
+    if (incoming.packet_id.indexOf("scene_") > -1) {
+        registerDataHandler(incoming.packet_id, processScenePacket);
+    } else if (incoming.packet_id.indexOf("flag_") > -1) {
+        registerDataHandler(incoming.packet_id, processFlagPacket);
+    } else if (incoming.packet_id.indexOf("skulltulas_") > -1) {
+        registerDataHandler(incoming.packet_id, processSkulltulaPacket)
     }
-    if (incoming.hasOwnProperty("scene_data")) {
-        if (!SceneStorage.hasOwnProperty("scene_data") || !initial_setup_complete) {
-            doesUpdate = false;
-        }
-        updateScenes({
-            addr: incoming.scene_data.addr,
-            scene_data: incoming.scene_data.scene_data,
-            uuid: uuid
-        })
-    }
-    else if (incoming.hasOwnProperty("flag_data")) {
-        if (!FlagStorage.hasOwnProperty("flag_data") || !initial_setup_complete) {
-            doesUpdate = false;
-        }
-        Object.keys(incoming.flag_data).forEach(function (key) {
-            updateFlags({addr: key, data: incoming.flag_data[key], uuid: uuid})
-        });
-    }
-    else if (incoming.hasOwnProperty("skulltulas")) {
-        if (!SkulltulaStorage.hasOwnProperty("skulltulas") || !initial_setup_complete) {
-            doesUpdate = false;
-        }
-        Object.keys(incoming.skulltulas).forEach(function (key) {
-            updateSkulltulas({addr: key, data: incoming.skulltulas[key], uuid: uuid})
-        });
-    } else if (incoming.hasOwnProperty("dungeon_items")) {
-        updateDungeonItems({addr: incoming.addr, data: incoming.dungeon_items, uuid: uuid});
-    } else if (incoming.hasOwnProperty("dungeon_key")) {
-        // Don't send this to the server directly. We'll send a delta from the handler itself.
-        updateDungeonKeyTrackers(incoming);
-        doesUpdate = false;
-    } else if (incoming.hasOwnProperty("dungeon_key_delta")) {
-        processDungeonKeyDelta(incoming);
-        doesUpdate = false;
-    }
-    else if (incoming.hasOwnProperty("scarecrow_data")) {
-        updateScarecrow({uuid: uuid, payload: incoming});
-    } else if (incoming.hasOwnProperty("bottle")) {
-        if (initial_setup_complete) {
-            updateInventory({uuid: uuid, data: incoming.bottle});
-        } else {
-            doesUpdate = false;
-        }
-    } else {
-        if (OotStorage == null && !initial_setup_complete && uuid === CONFIG.my_uuid) {
+    if (!initial_setup_complete && uuid === CONFIG.my_uuid) {
+        if (OotStorage === null) {
             sendJustText("Loading initial game state...");
             OotStorage = loadBaseData();
-            updateBundles({uuid: uuid, data: incoming});
-            updateInventory({uuid: uuid, data: incoming});
-            overlayHandler(incoming);
-            setTimeout(function () {
-                sendJustText("Sending sync request...");
-                sendDataToMasterOnChannel('initial_sync', {player_connecting: true, pierre: false});
-                initial_setup_complete = true;
-            }, 10000);
-            doesUpdate = false;
-            return doesUpdate;
-        } else {
-            if (initial_setup_complete) {
-                updateInventory({uuid: uuid, data: incoming});
-                updateBundles({uuid: uuid, data: incoming});
-                checkForGanon(incoming);
-                overlayHandler(incoming);
-            }
+            initial_setup_complete = true;
+        }
+        runDataHandler(incoming.packet_id, incoming, uuid);
+        doesUpdate = false;
+    } else {
+        if (initial_setup_complete) {
+            doesUpdate = runDataHandler(incoming.packet_id, incoming, uuid);
         }
     }
     return doesUpdate;
@@ -602,11 +677,6 @@ function parseData(data) {
         let decode = Buffer.from(unpack.data, 'base64');
         let incoming = JSON.parse(decode);
         incoming["packet_id"] = unpack.packet_id;
-        if (incoming.hasOwnProperty("seed")) {
-            seed = incoming.seed;
-            console.log("Randomizer seed: " + seed);
-            return;
-        }
         if (processData(incoming, CONFIG.my_uuid)) {
             sendDataToMaster(incoming);
         }
@@ -664,10 +734,25 @@ let DungeonStorage = {
     small_keys: {}
 };
 
-let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "bottle1", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bottle2", "bombchu", "bombs", "bottle4", "bottle3", "dins", "slingshot", "hookshot", "beans"];
+let inventory_keys = ["ctrade", "atrade", "lens", "ocarina", "stick", "fwind", "iarrow", "farrow", "hammer", "nuts", "larrow", "boomerang", "nlove", "bow", "bombchu", "bombs", "dins", "slingshot", "hookshot", "beans", "beans_bought", "poe_score", "bottle_1", "bottle_2", "bottle_3", "bottle_4"];
 let inventory_blank = 255;
 let boolean_keys = ["magic_bool", "biggeron_flag", "defense"];
 let int_keys = ["hearts", "magic_size", "magic_limit"];
+
+registerDataHandlers(inventory_keys, function (incoming, uuid) {
+    if (initial_setup_complete) {
+        return updateInventory(incoming, uuid);
+    }
+    return false;
+});
+
+registerDataHandlers(boolean_keys, function (incoming, uuid) {
+    return boolHandler(incoming, uuid);
+});
+
+registerDataHandlers(int_keys, function (incoming, uuid) {
+    return intHandler(incoming, uuid);
+});
 
 let tunic_targets = {green: 7, red: 6, blue: 5};
 
@@ -766,16 +851,16 @@ function bottleTranslation(int) {
     }
 }
 
-registerKeyTranslation("bottle1", function (int) {
+registerKeyTranslation("bottle_1", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle2", function (int) {
+registerKeyTranslation("bottle_2", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle3", function (int) {
+registerKeyTranslation("bottle_3", function (int) {
     return bottleTranslation(int);
 });
-registerKeyTranslation("bottle4", function (int) {
+registerKeyTranslation("bottle_4", function (int) {
     return bottleTranslation(int);
 });
 registerKeyTranslation("iarrow", "Ice Arrows");
@@ -814,9 +899,9 @@ registerKeyTranslation("magic_limit", function (data) {
 registerKeyTranslation("beans_bought", "Magic Beans purchased +1");
 registerKeyTranslation("poe_score", "Big Poe Score Card +100");
 
-function overlayHandler(data) {
-    OotOverlay_data["skull_tokens_count"] = data["skull_tokens_count"];
-}
+registerDataHandler("skull_tokens_count", function (incoming, uuid) {
+    OotOverlay_data["skull_tokens_count"] = incoming["skull_tokens_count"];
+});
 
 let int_special_handlers = {};
 
@@ -825,15 +910,15 @@ function registerSpecialIntHandler(key, callback) {
     //console.log("Registered int handler for key " + key + ".");
 }
 
-registerSpecialIntHandler("magic_size", function (key, pack) {
-    if (CONFIG.my_uuid !== pack["uuid"]) {
+registerSpecialIntHandler("magic_size", function (key, data, uuid) {
+    if (CONFIG.my_uuid !== uuid) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x60}};
         send(r2);
     }
 });
 
-registerSpecialIntHandler("hearts", function (key, pack) {
-    if (CONFIG.my_uuid !== pack["uuid"]) {
+registerSpecialIntHandler("hearts", function (key, data, uuid) {
+    if (CONFIG.my_uuid !== uuid) {
         let r2 = {
             message: "Filling up your health due to gaining a heart container...",
             payload: {heal: 101}
@@ -842,8 +927,7 @@ registerSpecialIntHandler("hearts", function (key, pack) {
     }
 });
 
-function intHandler(pack) {
-    let data = pack.data;
+function intHandler(data, uuid) {
     let flag = false;
     try {
         Object.keys(int_keys).forEach(function (key) {
@@ -855,14 +939,14 @@ function intHandler(pack) {
             if ((OotStorage[v] < data[v])) {
                 flag = true;
                 OotStorage[v] = data[v];
-                if (CONFIG.my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== uuid) {
                     let r = {message: "Received " + getKeyTranslation(v, data[v]) + ".", payload: {}};
                     r.payload[v] = OotStorage[v];
                     send(r);
                 }
                 OotOverlay_data[v] = OotStorage[v];
                 if (int_special_handlers.hasOwnProperty(v)) {
-                    int_special_handlers[v](v, pack);
+                    int_special_handlers[v](v, data, uuid);
                 }
             }
         });
@@ -881,30 +965,36 @@ function registerSpecialBoolHandler(key, callback) {
     //console.log("Registered bool handler for key " + key + ".");
 }
 
-registerSpecialBoolHandler("magic_bool", function (key, pack) {
-    if (CONFIG.my_uuid !== pack["uuid"]) {
+registerSpecialBoolHandler("magic_bool", function (key, data, uuid) {
+    if (CONFIG.my_uuid !== uuid) {
         let r2 = {message: "Filling up your magic...", payload: {magic_pool: 0x30}};
         send(r2);
     }
 });
 
-function boolHandler(pack) {
+function boolHandler(data, uuid) {
     let flag = false;
-    let data = pack.data;
     try {
         Object.keys(boolean_keys).forEach(function (key) {
             let v = boolean_keys[key];
+            if (!data.hasOwnProperty(v)) {
+                return;
+            }
+            if (!OotStorage.hasOwnProperty(v)) {
+                OotStorage[v] = data[v];
+                OotOverlay_data[v] = (OotStorage[v] === 1);
+            }
             if ((OotStorage[v] === 0 && data[v] !== 0)) {
                 flag = true;
                 OotStorage[v] = data[v];
-                if (CONFIG.my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== uuid) {
                     let r = {message: "Received " + getKeyTranslation(v, data[v]) + ".", payload: {}};
                     r.payload[v] = OotStorage[v];
                     send(r);
                 }
                 OotOverlay_data[v] = (OotStorage[v] === 1);
                 if (bool_special_handlers.hasOwnProperty(v)) {
-                    bool_special_handlers[v](v, pack);
+                    bool_special_handlers[v](v, data, uuid);
                 }
             }
         });
@@ -916,19 +1006,28 @@ function boolHandler(pack) {
     return flag;
 }
 
-function genericBundleHandler(pack, keyMap, storageKey) {
+function genericBundleHandler(data, uuid, keyMap, storageKey) {
     let flag = false;
-    let data = pack.data;
     try {
         if (!OotStorage.hasOwnProperty(storageKey)) {
-            OotStorage[storageKey] = [];
+            OotStorage[storageKey] = data[storageKey];
+            Object.keys(keyMap).forEach(function (key) {
+                let bit = keyMap[key];
+                if (OotStorage[storageKey][bit] === 1) {
+                    console.log("Yes " + key);
+                    OotOverlay_data[key] = true;
+                } else {
+                    console.log("No " + key);
+                }
+            });
+            return false;
         }
         Object.keys(keyMap).forEach(function (key) {
             let bit = keyMap[key];
             if ((OotStorage[storageKey][bit] === 0 && data[storageKey][bit] === 1)) {
                 flag = true;
                 OotStorage[storageKey][bit] = data[storageKey][bit];
-                if (CONFIG.my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== uuid) {
                     let r = {message: "Received " + getKeyTranslation(key, data[storageKey][bit]) + ".", payload: {}};
                     r.payload[storageKey] = OotStorage[storageKey];
                     send(r);
@@ -944,14 +1043,14 @@ function genericBundleHandler(pack, keyMap, storageKey) {
     } catch (err) {
         if (err) {
             console.log(err);
-            console.log(pack);
+            console.log(data);
         }
     }
     return flag;
 }
 
-function tunicHandler(data) {
-    return genericBundleHandler(data, tunic_targets, "tunics");
+function tunicHandler(data, uuid) {
+    return genericBundleHandler(data, uuid, tunic_targets, "tunics");
 }
 
 let boot_targets = {boots: 3, iron: 2, hover: 1};
@@ -960,9 +1059,20 @@ registerKeyTranslation("boots", "Kokiri Boots");
 registerKeyTranslation("iron", "Iron Boots");
 registerKeyTranslation("hover", "Hover Boots");
 
-function bootHandler(data) {
-    return genericBundleHandler(data, boot_targets, "tunics");
+function bootHandler(data, uuid) {
+    return genericBundleHandler(data, uuid, boot_targets, "tunics");
 }
+
+registerDataHandler("tunics", function (incoming, uuid) {
+    let flag = false;
+    if (tunicHandler(incoming, uuid)) {
+        flag = true;
+    }
+    if (bootHandler(incoming, uuid)) {
+        flag = true;
+    }
+    return flag;
+});
 
 let sword_targets = {kokori: 7, master: 6, giants: 5, broken: 4};
 
@@ -971,8 +1081,8 @@ registerKeyTranslation("master", "Master Sword");
 registerKeyTranslation("giants", "Giant's Knife");
 registerKeyTranslation("broken", "Broken Sword");
 
-function swordHandler(data) {
-    return genericBundleHandler(data, sword_targets, "swords");
+function swordHandler(data, uuid) {
+    return genericBundleHandler(data, uuid, sword_targets, "swords");
 }
 
 let shield_targets = {deku: 3, hylian: 2, mirror: 1};
@@ -981,15 +1091,25 @@ registerKeyTranslation("deku", "Deku Shield");
 registerKeyTranslation("hylian", "Hylian Shield");
 registerKeyTranslation("mirror", "Mirror Shield");
 
-function shieldHandler(data) {
-    return genericBundleHandler(data, shield_targets, "swords");
+function shieldHandler(data, uuid) {
+    return genericBundleHandler(data, uuid, shield_targets, "swords");
 }
+
+registerDataHandler("swords", function (incoming, uuid) {
+    let flag = false;
+    if (swordHandler(incoming, uuid)) {
+        flag = true;
+    }
+    if (shieldHandler(incoming, uuid)) {
+        flag = true;
+    }
+    return flag;
+});
 
 let upgrade_amount_overrides = {};
 
-function genericUpgradeHandler(pack, targets, storageKey, payloads) {
+function genericUpgradeHandler(data, uuid, targets, storageKey, payloads) {
     let flag = false;
-    let data = pack.data;
     try {
         Object.keys(targets).forEach(function (key) {
             let current = [];
@@ -1017,7 +1137,7 @@ function genericUpgradeHandler(pack, targets, storageKey, payloads) {
                 });
                 flag = true;
                 console.log(key + " " + theirLevel);
-                if (CONFIG.my_uuid !== pack["uuid"]) {
+                if (CONFIG.my_uuid !== uuid) {
                     let k = key + " " + theirLevel;
                     let r = {
                         message: "Received " + getKeyTranslation(key + "_u", Number(theirLevel)) + ".",
@@ -1117,19 +1237,21 @@ let upgrade_no_increase = [
     "stick 0", "bomb 0", "arrows 0", "bullet 0", "nuts 0"
 ];
 
-function upgrade_handler(data) {
-    let flag = false;
-    if (genericUpgradeHandler(data, upgrade_1_targets, "upgrades_1", upgrade_1_payloads)) {
-        flag = true;
-    }
-    if (genericUpgradeHandler(data, upgrade_2_targets, "upgrades_2", upgrade_2_payloads)) {
-        flag = true;
-    }
-    if (genericUpgradeHandler(data, upgrade_3_targets, "upgrades_3", upgrade_3_payloads)) {
-        flag = true;
-    }
-    return flag;
+function upgradeHandler1(incoming, uuid) {
+    return genericUpgradeHandler(incoming, uuid, upgrade_1_targets, "upgrades_1", upgrade_1_payloads);
 }
+
+function upgradeHandler2(incoming, uuid) {
+    return genericUpgradeHandler(incoming, uuid, upgrade_2_targets, "upgrades_2", upgrade_2_payloads);
+}
+
+function upgradeHandler3(incoming, uuid) {
+    return genericUpgradeHandler(incoming, uuid, upgrade_3_targets, "upgrades_3", upgrade_3_payloads);
+}
+
+registerDataHandler("upgrades_1", upgradeHandler1);
+registerDataHandler("upgrades_2", upgradeHandler2);
+registerDataHandler("upgrades_3", upgradeHandler3);
 
 let quest_1_targets = {
     song_of_time: 7,
@@ -1169,19 +1291,21 @@ registerKeyTranslation("light", "Light Medallion");
 registerKeyTranslation("minuet", "Minuet of the Forest");
 registerKeyTranslation("bolero", "Bolero of Fire");
 
-function quest_handler(data) {
-    let flag = false;
-    if (genericBundleHandler(data, quest_1_targets, "quest_1")) {
-        flag = true;
-    }
-    if (genericBundleHandler(data, quest_2_targets, "quest_2")) {
-        flag = true;
-    }
-    if (genericBundleHandler(data, quest_3_targets, "quest_3")) {
-        flag = true;
-    }
-    return flag;
+function questHandler1(incoming, uuid) {
+    return genericBundleHandler(incoming, uuid, quest_1_targets, "quest_1");
 }
+
+function questHandler2(incoming, uuid) {
+    return genericBundleHandler(incoming, uuid, quest_2_targets, "quest_2");
+}
+
+function questHandler3(incoming, uuid) {
+    return genericBundleHandler(incoming, uuid, quest_3_targets, "quest_3");
+}
+
+registerDataHandler("quest_1", questHandler1);
+registerDataHandler("quest_2", questHandler2);
+registerDataHandler("quest_3", questHandler3);
 
 let inventory_special_handlers = {};
 
@@ -1227,10 +1351,10 @@ function bottleHandler(key, value, data) {
     return value !== inventory_blank && value !== data[key] && data[key] !== inventory_blank;
 }
 
-registerInventoryHandler("bottle1", bottleHandler);
-registerInventoryHandler("bottle2", bottleHandler);
-registerInventoryHandler("bottle3", bottleHandler);
-registerInventoryHandler("bottle4", bottleHandler);
+registerInventoryHandler("bottle_1", bottleHandler);
+registerInventoryHandler("bottle_2", bottleHandler);
+registerInventoryHandler("bottle_3", bottleHandler);
+registerInventoryHandler("bottle_4", bottleHandler);
 
 let inventory_amount_handlers = {};
 
@@ -1243,8 +1367,8 @@ registerInventoryAmountHandler("bombchu", function () {
     return 10;
 });
 
-function updateInventory(pack) {
-    let data = pack.data;
+function updateInventory(data, uuid) {
+    let flag = false;
     try {
         Object.keys(data).forEach(function (k) {
             // The idea here is the client can send incomplete inventory updates when necessary.
@@ -1259,6 +1383,7 @@ function updateInventory(pack) {
                 OotStorage[inventory_keys[key]] = data[inventory_keys[key]];
                 console.log("Setting value for inventory key: " + inventory_keys[key] + ".");
                 OotOverlay_data[inventory_keys[key]] = data[inventory_keys[key]];
+                flag = true;
             }
             let val = OotStorage[inventory_keys[key]];
             let handler = "basic_handler";
@@ -1268,7 +1393,8 @@ function updateInventory(pack) {
             if (inventory_special_handlers[handler](inventory_keys[key], val, data)) {
                 OotStorage[inventory_keys[key]] = data[inventory_keys[key]];
                 val = OotStorage[inventory_keys[key]];
-                if (CONFIG.my_uuid !== pack["uuid"]) {
+                flag = true;
+                if (CONFIG.my_uuid !== uuid) {
                     let r = {message: "Received " + getKeyTranslation(inventory_keys[key], val) + ".", payload: {}};
                     r.payload[inventory_keys[key]] = data[inventory_keys[key]];
                     if (inventory_amount_handlers.hasOwnProperty(inventory_keys[key])) {
@@ -1286,17 +1412,7 @@ function updateInventory(pack) {
             console.log(err);
         }
     }
-}
-
-function updateBundles(data) {
-    tunicHandler(data);
-    bootHandler(data);
-    swordHandler(data);
-    shieldHandler(data);
-    upgrade_handler(data);
-    quest_handler(data);
-    boolHandler(data);
-    intHandler(data);
+    return flag;
 }
 
 // Thanks to Delph for having the patience to sort these out.
@@ -1658,6 +1774,15 @@ registerDungeonName("0x11A69A", "Ganon's Tower Collapse");
 class DungeonSmallKeyTracker {
     constructor() {
         this._keyCount = 0;
+        this._last_timestamp = 0;
+    }
+
+    get last_timestamp() {
+        return this._last_timestamp;
+    }
+
+    set last_timestamp(value) {
+        this._last_timestamp = value;
     }
 
     get keyCount() {
@@ -1666,7 +1791,6 @@ class DungeonSmallKeyTracker {
 
     set keyCount(value) {
         this._keyCount = value;
-        console.log("Keys are now " + this._keyCount);
     }
 
     getDelta(int) {
@@ -1675,6 +1799,7 @@ class DungeonSmallKeyTracker {
             diff /= -1;
         }
         this.keyCount += diff;
+        this.last_timestamp = new Date().getMilliseconds();
         return diff;
     }
 }
@@ -1697,7 +1822,7 @@ function updateDungeonKeyTrackers(update) {
     }
     msg += delta.toString();
     if (delta !== 0) {
-        sendDataToMaster({message: msg, dungeon_key_delta: delta, addr: update.addr});
+        sendDataToMaster({message: msg, dungeon_key_delta: delta, addr: update.addr, packet_id: "dungeon_key_delta"});
     }
 }
 
@@ -1712,13 +1837,14 @@ function processDungeonKeyDelta(update) {
 
 let seen_ganon_message = false;
 
-function checkForGanon(d) {
-    if (d.scene === 25 && (CONFIG.my_uuid !== d.uuid) && !seen_ganon_message) {
+registerDataHandler("scene", function (incoming, uuid) {
+    if (incoming.scene === 25 && (CONFIG.my_uuid !== uuid) && !seen_ganon_message) {
         sendJustText("An ally has engaged Ganon!");
         send({message: "Press Dpad Left to join them!", ganon: true});
         seen_ganon_message = true;
     }
-}
+    return true;
+});
 
 // Generic helpers
 
