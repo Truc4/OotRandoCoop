@@ -201,6 +201,10 @@ function twoByteWriteHandler(lookup, data)
 end
 
 function bundleWriteHandler(lookup, data)
+    writeByte(memory_lookup[lookup], fromBits(data));
+end
+
+function bundleWriteHandlerEquipment(lookup, data)
     local binary_compare = toBits(readByte(memory_lookup[lookup]), 8);
     for k, v in pairs(binary_compare) do
         if (v == 1 and data[k] == 0) then
@@ -252,14 +256,14 @@ write_handlers["heal"] = twoByteWriteHandler;
 write_handlers["magic_limit"] = twoByteWriteHandler;
 write_handlers["poe_score"] = twoByteWriteHandler;
 
-write_handlers["tunics"] = bundleWriteHandler;
-write_handlers["swords"] = bundleWriteHandler;
+write_handlers["tunics"] = bundleWriteHandlerEquipment;
+write_handlers["swords"] = bundleWriteHandlerEquipment;
 write_handlers["upgrades_1"] = bundleWriteHandler;
 write_handlers["upgrades_2"] = bundleWriteHandler;
 write_handlers["upgrades_3"] = bundleWriteHandler;
-write_handlers["quest_1"] = bundleWriteHandler;
-write_handlers["quest_2"] = bundleWriteHandler;
-write_handlers["quest_3"] = bundleWriteHandler;
+write_handlers["quest_1"] = bundleWriteHandlerEquipment;
+write_handlers["quest_2"] = bundleWriteHandlerEquipment;
+write_handlers["quest_3"] = bundleWriteHandlerEquipment;
 
 write_handlers["magic_pool"] = magicWriteHandler;
 
