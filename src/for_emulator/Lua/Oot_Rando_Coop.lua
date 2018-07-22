@@ -201,6 +201,13 @@ function twoByteWriteHandler(lookup, data)
 end
 
 function bundleWriteHandler(lookup, data)
+    local binary_compare = toBits(readByte(memory_lookup[lookup]), 8);
+    for k, v in pairs(binary_compare) do
+        if (v == 1 and data[k] == 0) then
+            -- Rewrite the bit to ensure no reversions due to frame timing...
+            data[k] = v;
+        end
+    end
     writeByte(memory_lookup[lookup], fromBits(data));
 end
 
