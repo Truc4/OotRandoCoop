@@ -679,7 +679,7 @@ function processPacketBuffer()
                 ganonWarpEnabled = true;
             elseif (packet.dungeon_key_delta ~= nil) then
                 writeDungeonDelta(packet);
-            elseif(packet.dungeon_items ~= nil) then
+            elseif (packet.dungeon_items ~= nil) then
                 writeDungeonData(packet);
             end
         end) then

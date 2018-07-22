@@ -54,9 +54,9 @@ function to_base64(to_encode)
     end
 
     for i = 1, string.len(bit_pattern), 6 do
-        local byte = string.sub(bit_pattern, i, i+5)
+        local byte = string.sub(bit_pattern, i, i + 5)
         local offset = tonumber(from_binary(byte))
-        encoded = encoded .. string.sub(index_table, offset+1, offset+1)
+        encoded = encoded .. string.sub(index_table, offset + 1, offset + 1)
     end
 
     return string.sub(encoded, 1, -1 - string.len(trailing)) .. trailing
@@ -73,21 +73,21 @@ function from_base64(to_decode)
         local char = string.sub(to_decode, i, i)
         local offset, _ = string.find(index_table, char)
         if offset == nil then
-             error("Invalid character '" .. char .. "' found.")
+            error("Invalid character '" .. char .. "' found.")
         end
 
-        bit_pattern = bit_pattern .. string.sub(to_binary(offset-1), 3)
+        bit_pattern = bit_pattern .. string.sub(to_binary(offset - 1), 3)
     end
 
     for i = 1, string.len(bit_pattern), 8 do
-        local byte = string.sub(bit_pattern, i, i+7)
+        local byte = string.sub(bit_pattern, i, i + 7)
         decoded = decoded .. string.char(from_binary(byte))
     end
 
-    local padding_length = padded:len()-unpadded:len()
+    local padding_length = padded:len() - unpadded:len()
 
     if (padding_length == 1 or padding_length == 2) then
-        decoded = decoded:sub(1,-2)
+        decoded = decoded:sub(1, -2)
     end
     return decoded
 end
