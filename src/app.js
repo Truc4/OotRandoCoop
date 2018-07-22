@@ -324,8 +324,9 @@ class Client {
                         packets.push(p);
                     });
                     Object.keys(SceneStorage.scene_data).forEach(function (key) {
-                        let p = {packet_id: "scene_" + key, scene_data: {}};
-                        p.scene_data[key] = SceneStorage.scene_data[key];
+                        let p = {packet_id: "scene_" + key, scene_data: {scene_data: {}}};
+                        p.scene_data.scene_data = SceneStorage.scene_data[key];
+                        p.scene_data.addr = key;
                         packets.push(p);
                     });
                     Object.keys(FlagStorage.flag_data).forEach(function (key) {
@@ -586,26 +587,31 @@ registerDataHandler("resync_me", function (incoming, uuid) {
 });
 
 function processScenePacket(incoming, uuid) {
-    updateScenes({
+    return updateScenes({
         addr: incoming.scene_data.addr,
         scene_data: incoming.scene_data.scene_data,
         uuid: uuid
     });
-    return true;
 }
 
 function processFlagPacket(incoming, uuid) {
+    let flag = false;
     Object.keys(incoming.flag_data).forEach(function (key) {
-        updateFlags({addr: key, data: incoming.flag_data[key], uuid: uuid})
+        if (updateFlags({addr: key, data: incoming.flag_data[key], uuid: uuid})) {
+            flag = true;
+        }
     });
-    return true;
+    return flag;
 }
 
 function processSkulltulaPacket(incoming, uuid) {
+    let flag = false;
     Object.keys(incoming.skulltulas).forEach(function (key) {
-        updateSkulltulas({addr: key, data: incoming.skulltulas[key], uuid: uuid})
+        if (updateSkulltulas({addr: key, data: incoming.skulltulas[key], uuid: uuid})) {
+            flag = true;
+        }
     });
-    return true;
+    return flag;
 }
 
 registerDataHandler("dungeon_items", function (incoming, uuid) {
@@ -1859,12 +1865,25 @@ registerDataHandler("scene", function (incoming, uuid) {
 // Generic helpers
 
 function writeSave(f) {
-    fs.writeFile(f, JSON.stringify(OotStorage), function (err) {
+    fs.writeFile(f, JSON.stringify({
+        storage: OotStorage,
+        scenes: SceneStorage,
+        flags: FlagStorage,
+        skulls: SkulltulaStorage
+    }), function (err) {
         if (err) {
             return console.log(err);
         }
         console.log("The file was saved!");
     });
+}
+
+function loadSave(f) {
+    let t = JSON.parse(fs.readFileSync(f));
+    OotStorage = t.storage;
+    SceneStorage = t.scenes;
+    FlagStorage = t.flags;
+    SkulltulaStorage = t.skulls;
 }
 
 function is(a, b) {
