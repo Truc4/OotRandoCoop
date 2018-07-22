@@ -1,15 +1,18 @@
 // This is Lynn the fake test client.
 // She mimics a normal OotRandoCoop client for testing purposes during development.
 
+const VERSION = "@major@.@minor@.@buildNumber@";
 const IO_Client = require('socket.io-client');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const aes256 = require('aes256');
 
 let master_server_ip = "127.0.0.1";
 let master_server_port = "8081";
 let GAME_ROOM = "strong-catfish-32";
 let nickname = "Lynn";
 let my_uuid = "";
+const ENC_KEY = crypto.createHash('md5').update(VERSION).digest("hex");
 
 function sendDataToMaster(data) {
     websocket.emit('msg', GAME_ROOM, encodeDataForClient({
@@ -28,11 +31,15 @@ function sendDataToMasterOnChannel(channel, data) {
 }
 
 function decodeDataFromClient(pack) {
-    return JSON.parse(zlib.inflateSync(new Buffer(pack, 'base64')).toString());
+    let decompress = zlib.inflateSync(pack).toString();
+    let decrypt = aes256.decrypt(ENC_KEY, decompress);
+    return JSON.parse(decrypt);
 }
 
 function encodeDataForClient(data) {
-    return zlib.deflateSync(JSON.stringify(data)).toString('base64');
+    let stringify = JSON.stringify(data);
+    let encrypt = aes256.encrypt(ENC_KEY, stringify);
+    return zlib.deflateSync(encrypt);
 }
 
 

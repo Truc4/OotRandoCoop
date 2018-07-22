@@ -27,6 +27,9 @@ const IO_Client = require('socket.io-client');
 const hri = require('human-readable-ids').hri;
 const crypto = require('crypto');
 const https = require('https');
+const aes256 = require('aes256');
+
+const ENC_KEY = crypto.createHash('md5').update(VERSION).digest("hex");
 
 // Config
 class Configuration {
@@ -362,7 +365,7 @@ class Client {
                 let parse = decodeDataFromClient(data);
                 if (parse.payload.target === CONFIG.my_uuid) {
                     for (let i = 0; i < parse.payload.packets.length; i++) {
-                        parseData(parse.payload.packets[i], parse.uuid);
+                        processData(parse.payload.packets[i], parse.uuid);
                     }
                 }
             });
@@ -493,11 +496,15 @@ class EmuConnection {
 const CONFIG = new Configuration();
 
 function decodeDataFromClient(pack) {
-    return JSON.parse(zlib.inflateSync(new Buffer(pack, 'base64')).toString());
+    let decompress = zlib.inflateSync(pack).toString();
+    let decrypt = aes256.decrypt(ENC_KEY, decompress);
+    return JSON.parse(decrypt);
 }
 
 function encodeDataForClient(data) {
-    return zlib.deflateSync(JSON.stringify(data)).toString('base64');
+    let stringify = JSON.stringify(data);
+    let encrypt = aes256.encrypt(ENC_KEY, stringify);
+    return zlib.deflateSync(encrypt);
 }
 
 let master = null;
@@ -621,6 +628,7 @@ registerDataHandler("scarecrow", function (incoming, uuid) {
         sendDataToMaster(incoming);
     }
     updateScarecrow({uuid: uuid, payload: incoming});
+    return false;
 });
 
 registerDataHandler("resync_keys", function (incoming, uuid) {
@@ -1738,7 +1746,7 @@ function updateDungeonItems(d) {
         }
         if (update_required) {
             if (CONFIG.my_uuid !== d["uuid"]) {
-                let r = {message: message, addr: d.addr, dungeon_items: {}};
+                let r = {message: message, addr: d.addr};
                 r["dungeon_items"] = DungeonStorage.items[d.addr];
                 send(r);
             }

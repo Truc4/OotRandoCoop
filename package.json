@@ -7,6 +7,7 @@
   },
   "bin": "./src/app.js",
   "dependencies": {
+    "aes256": "^1.0.3",
     "concat-files": "^0.1.1",
     "human-readable-ids": "^1.0.4",
     "nat-upnp": "^1.1.1",

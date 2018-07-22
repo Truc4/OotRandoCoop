@@ -513,6 +513,10 @@ function dumpDungeonData()
     end
 end
 
+function writeDungeonData(packet)
+    writeByte(tonumber(packet.addr), fromBits(packet.dungeon_items));
+end
+
 function dumpDungeonKeys(index)
     local addr = small_keys[index];
     local memdump = readByte(addr);
@@ -675,6 +679,8 @@ function processPacketBuffer()
                 ganonWarpEnabled = true;
             elseif (packet.dungeon_key_delta ~= nil) then
                 writeDungeonDelta(packet);
+            elseif(packet.dungeon_items ~= nil) then
+                writeDungeonData(packet);
             end
         end) then
         else
