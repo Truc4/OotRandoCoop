@@ -759,7 +759,7 @@ function sendToGanon()
             end
             writeByte(0x11A5D7, 0x0);
         end
-    end, 200);
+    end, 1000);
 end
 
 local already_seen_menu = false;
