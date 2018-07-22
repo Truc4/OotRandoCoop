@@ -1726,12 +1726,15 @@ registerDungeonItemName(6, "Compass");
 registerDungeonItemName(7, "Boss Key");
 
 function updateDungeonItems(d) {
+    let update_required = false;
     if (!DungeonStorage.items.hasOwnProperty(d.addr)) {
         DungeonStorage.items[d.addr] = d.data;
         console.log("Writing initial dungeon item data for address " + d.addr);
+        if (d.uuid !== CONFIG.my_uuid) {
+            update_required = true;
+        }
     }
     let list = [];
-    let update_required = false;
     let message = "";
     message += getDungeonName(d.addr);
     message += " ";
