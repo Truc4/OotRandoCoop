@@ -28,7 +28,6 @@ const hri = require('human-readable-ids').hri;
 const crypto = require('crypto');
 const https = require('https');
 const aes256 = require('aes256');
-const sleep = require('sleep');
 
 const ENC_KEY = crypto.createHash('md5').update(VERSION).digest("hex");
 
@@ -509,8 +508,9 @@ function decodeDataFromClient(pack) {
     }catch(err){
         if (err){
             console.log("Server / Client version mismatch. Please update your client.");
-            sleep.sleep(30);
-            process.exit();
+            setTimeout(function(){
+                process.exit();
+            }, 5000);
         }
     }
 }
