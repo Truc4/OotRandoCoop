@@ -15,6 +15,7 @@
     "node-lzw": "^0.3.1",
     "restify": "^7.2.1",
     "serve-static-restify": "^2.1.0",
+    "sleep": "^5.1.1",
     "socket.io": "^2.1.1",
     "socket.io-client": "^2.1.1",
     "uuid": "^3.2.1"

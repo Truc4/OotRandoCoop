@@ -28,6 +28,7 @@ const hri = require('human-readable-ids').hri;
 const crypto = require('crypto');
 const https = require('https');
 const aes256 = require('aes256');
+const sleep = require('sleep');
 
 const ENC_KEY = crypto.createHash('md5').update(VERSION).digest("hex");
 
@@ -501,9 +502,17 @@ class EmuConnection {
 const CONFIG = new Configuration();
 
 function decodeDataFromClient(pack) {
-    let decompress = zlib.inflateSync(pack).toString();
-    let decrypt = aes256.decrypt(ENC_KEY, decompress);
-    return JSON.parse(decrypt);
+    try{
+        let decompress = zlib.inflateSync(pack).toString();
+        let decrypt = aes256.decrypt(ENC_KEY, decompress);
+        return JSON.parse(decrypt);
+    }catch(err){
+        if (err){
+            console.log("Server / Client version mismatch. Please update your client.");
+            sleep.sleep(30);
+            process.exit();
+        }
+    }
 }
 
 function encodeDataForClient(data) {
