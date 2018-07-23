@@ -227,7 +227,6 @@ function magicWriteHandler(lookup, data)
 end
 
 for k, v in pairs(memory_lookup) do
-    --console.writeline("Memory Handler: " .. k);
     special_handlers[k] = basicItemSync;
     read_handlers[k] = basicReadHandler;
     write_handlers[k] = basicWriteHandler;
@@ -273,14 +272,18 @@ function runDataFunction(lookup)
 end
 
 current_scene = 0;
+local saved_at_ganon = false;
 
 function readScene()
     current_scene = readByte(0x1C8545);
     if (current_scene == 25) then
         sendPacket("scene", { scene = current_scene });
+        if (saved_at_ganon ~= true) then
+            savestate.saveslot(0);
+            saved_at_ganon = true;
+        end
     end
 end
-
 
 function DEC_HEX(IN)
     local B, K, OUT, I, D = 16, "0123456789ABCDEF", "", 0
