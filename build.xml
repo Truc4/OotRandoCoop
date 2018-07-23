@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project name="OotRandoCoop" default="build" basedir=".">
 
-    <property name="project-name" value="${ant.project.name}" />
+    <property name="project-name" value="${ant.project.name}"/>
     <property name="ini" value="./OotRandoCoop-config.ini"/>
     <property name="dist" value="./dist"/>
     <property name="bin" value="./bin"/>
@@ -10,11 +10,11 @@
     <property name="emu" value="./src/for_emulator"/>
 
     <condition property="cmd.exec" value="cmd" else="/bin/sh">
-        <os family="windows" />
+        <os family="windows"/>
     </condition>
 
     <condition property="cmd.con" value="/c" else="-c">
-        <os family="windows" />
+        <os family="windows"/>
     </condition>
 
     <target name="clean">
@@ -51,12 +51,13 @@
     </target>
 
     <target name="copy_files">
-        <copy todir="${tfolder}/Lua" >
+        <copy todir="${tfolder}/Lua">
             <fileset dir="${bin}/Lua" includes="**"/>
         </copy>
-        <copy todir="${tfolder}/overlay" >
+        <copy todir="${tfolder}/overlay">
             <fileset dir="./overlay" includes="**"/>
         </copy>
+        <copy file="Oot-Rando-Coop-config.json" tofile="${tfolder}/Oot-Rando-Coop-config.json"/>
     </target>
 
     <target name="compile_scripts">
@@ -65,18 +66,18 @@
             <arg value="${cmd.con}"/>
             <arg value="node build.js"/>
         </exec>
-        <copy todir="${bin}" >
+        <copy todir="${bin}">
             <fileset dir="./src" includes="*.js"/>
         </copy>
         <replace file="${bin}/app.js" propertyFile="build.properties">
-            <replacefilter token="@major@" property="major" />
-            <replacefilter token="@minor@" property="minor" />
-            <replacefilter token="@buildNumber@" property="build.number" />
+            <replacefilter token="@major@" property="major"/>
+            <replacefilter token="@minor@" property="minor"/>
+            <replacefilter token="@buildNumber@" property="build.number"/>
         </replace>
         <replace file="${bin}/Lua/Oot_Rando_Coop.lua" propertyFile="build.properties">
-            <replacefilter token="@major@" property="major" />
-            <replacefilter token="@minor@" property="minor" />
-            <replacefilter token="@buildNumber@" property="build.number" />
+            <replacefilter token="@major@" property="major"/>
+            <replacefilter token="@minor@" property="minor"/>
+            <replacefilter token="@buildNumber@" property="build.number"/>
         </replace>
     </target>
 

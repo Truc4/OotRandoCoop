@@ -1,0 +1,14 @@
+{
+  "SERVER": {
+    "master_server_ip": "192.99.70.23",
+    "master_server_port": "8081",
+    "isMaster": false
+  },
+  "CLIENT": {
+    "isTracker": true,
+    "isClient": true,
+    "nickname": "Player",
+    "game_room": "",
+    "game_password": ""
+  }
+}

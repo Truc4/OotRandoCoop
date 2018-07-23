@@ -61,6 +61,10 @@ class Configuration {
         this._nickname = this.cfg.CLIENT.nickname;
         this._GAME_ROOM = this.cfg.CLIENT.game_room;
         this._game_password = this.cfg.CLIENT.game_password;
+        if (this._GAME_ROOM === ""){
+            this._GAME_ROOM = hri.random();
+            this.save();
+        }
     }
 
     get game_password() {
