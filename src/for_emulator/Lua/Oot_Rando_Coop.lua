@@ -452,6 +452,7 @@ function dumpScarecrow()
 end
 
 function writeScarecrow(data)
+    savestate.saveslot(0);
     for k, v in pairs(data.pierre) do
         for j, k in pairs(v) do
             writeByte(tonumber(j), fromBits(k));
