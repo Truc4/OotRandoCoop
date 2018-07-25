@@ -277,7 +277,8 @@ local saved_at_ganon = false;
 function readScene()
     current_scene = readByte(0x1C8545);
     if (current_scene == 25) then
-        sendPacket("scene", { scene = current_scene });
+        -- Disable this until I can make it work more consistently.
+        --sendPacket("scene", { scene = current_scene });
         if (saved_at_ganon ~= true) then
             savestate.saveslot(0);
             saved_at_ganon = true;
