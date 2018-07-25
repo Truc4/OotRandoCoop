@@ -70,7 +70,7 @@ Configure your node: Open OotRandoCoop-config.json in any text editor.
 - nickname: Name other players see when connecting.
 - isTracker: Enable or disable the built in automated item tracker. The tracker can be accessed by going to http://localhost:8082 in a web browser.
 - isClient: Enable or disable the client system. Only turn this off if you're hosting a dedicated master server.
-- game_room: The name of the game room you wish to connect to. This can be any string.
+- game_room: The name of the game room you wish to connect to. This can be any string and should be unique for your team.
 - game_password: Optional password to lock your room. Only people with a matching game_room and game_password will be able to join your game.
 
 ![tracker](https://i.imgur.com/LTvTKhm.png)
