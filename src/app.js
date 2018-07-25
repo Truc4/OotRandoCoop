@@ -1302,7 +1302,7 @@ registerKeyTranslation("card", "Gerudo Membership Card");
 registerKeyTranslation("skulltula_flag", "Skulltulas");
 registerKeyTranslation("serenade", "Serenade of Water");
 registerKeyTranslation("requiem", "Requiem of Spirit");
-registerKeyTranslation("nocturn", "Nocturn of Shadow");
+registerKeyTranslation("nocturn", "Nocturne of Shadow");
 registerKeyTranslation("prelude", "Prelude of Light");
 registerKeyTranslation("lullaby", "Zelda's Lullaby");
 registerKeyTranslation("epona", "Epona's Song");
